@@ -314,7 +314,7 @@ Training seeds: **YOU MUST FILL IN** if the notebook set any.
 
 | Question | File and line |
 |---|---|
-| "Show me your model" | `ml-engine/bilstm_model.py:28` (class), `:52` `forward` (LSTM → mean pool → fc1 → ReLU → fc2 → sigmoid) |
+| "Show me your model" | `ml-engine/bilstm_model.py:29` (class), `:52` `forward` (LSTM → mean pool → fc1 → ReLU → fc2 → sigmoid) |
 | "How do you run inference?" | `ml-engine/bilstm_model.py:81` `predict` (tensor shape (1, 30, 34), `torch.no_grad()`) |
 | "How do you get keypoints?" | `ml-engine/pose_extractor.py:97` `extract_frame_detailed` (YOLO, normalise x/w, y/h) |
 | "How does the live sliding window work?" | `ml-engine/streaming_detector.py:85` `push`, coverage guard `:32` |
