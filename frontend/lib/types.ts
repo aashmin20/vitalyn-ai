@@ -90,7 +90,9 @@ export interface DashboardOverview {
   total_beds: number;
   occupied_beds: number;
   vacant_beds: number;
-  uncertain_beds: number;
+  uncertain_beds: number;          // camera could not tell (only beds with a camera)
+  not_ready_beds: number;          // cleaning or maintenance
+  camera_occupied_beds: number;    // camera currently sees a person
   occupied_percentage: number;
   active_fall_events: number;
   active_alerts: number;

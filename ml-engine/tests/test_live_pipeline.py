@@ -46,6 +46,7 @@ class FakeDB:
         self.patient_ids = getattr(self, 'patient_ids', []) + [patient_id]
         return "job-1"
     def get_or_create_default_bed(self, room_id): return "bed-1"
+    def bed_for_session(self, room_id, patient_id=None): return "bed-1"
     def write_live_occupancy(self, job, bed, status, conf, at): self.occupancy.append((status, conf))
     def write_live_fall_event(self, job, room, bed, conf, at, patient_id=None):
         self.events.append(conf); self.event_patients = getattr(self, 'event_patients', []) + [patient_id]

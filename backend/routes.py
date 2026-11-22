@@ -10,7 +10,7 @@ import shutil
 import threading
 import logging
 
-from models import Room, Bed, InferenceJob, OccupancyRecord, FallEvent, Alert, User
+from models import Room, Bed, InferenceJob, OccupancyRecord, FallEvent, Alert, Patient, User
 import audit
 from auth import AuthUser, current_user, require_roles
 from database import get_session
@@ -442,26 +442,30 @@ def resolve_alert(
 
 @router.get("/dashboard/overview")
 def get_dashboard_overview(session: Session = Depends(get_session)):
-    total_beds = session.exec(select(func.count(Bed.id))).one()
+    """Bed counts come from ADMISSIONS (who is assigned to which bed), the same source as the ward
+    board. Camera-detected presence is reported separately and never overrides an admission."""
+    beds = session.exec(select(Bed)).all()
+    total_beds = len(beds)
+    occupied_ids = {
+        p.bed_id for p in session.exec(
+            select(Patient).where(Patient.status == "admitted", Patient.bed_id.is_not(None))
+        ).all()
+    }
+    occupied_beds = sum(1 for b in beds if b.id in occupied_ids)
+    vacant_beds = sum(1 for b in beds if b.id not in occupied_ids and b.status in ("active", "available"))
+    not_ready_beds = total_beds - occupied_beds - vacant_beds          # cleaning / maintenance
+    occupied_percentage = round((occupied_beds / total_beds) * 100, 1) if total_beds > 0 else 0.0
 
-    # Get latest status per bed
-    all_records = session.exec(
-        select(OccupancyRecord)
-        .order_by(OccupancyRecord.observed_at.desc())
-    ).all()
-
+    # Camera view: latest occupancy record per bed (only beds with a live/uploaded camera have one).
     seen_beds: set = set()
-    latest_records = []
-    for r in all_records:
+    camera_occupied = camera_uncertain = 0
+    for r in session.exec(select(OccupancyRecord).order_by(OccupancyRecord.observed_at.desc())).all():
         bid = str(r.bed_id) if r.bed_id else None
         if bid and bid not in seen_beds:
             seen_beds.add(bid)
-            latest_records.append(r)
-
-    occupied_beds = sum(1 for r in latest_records if r.occupancy_status == "occupied")
-    vacant_beds = sum(1 for r in latest_records if r.occupancy_status == "vacant")
-    uncertain_beds = sum(1 for r in latest_records if r.occupancy_status == "uncertain")
-    occupied_percentage = round((occupied_beds / total_beds) * 100, 1) if total_beds > 0 else 0.0
+            camera_occupied += r.occupancy_status == "occupied"
+            camera_uncertain += r.occupancy_status == "uncertain"
+    uncertain_beds = camera_uncertain
 
     active_fall_events = session.exec(
         select(func.count(FallEvent.id)).where(FallEvent.status == "active")
@@ -476,6 +480,8 @@ def get_dashboard_overview(session: Session = Depends(get_session)):
         "occupied_beds": occupied_beds,
         "vacant_beds": vacant_beds,
         "uncertain_beds": uncertain_beds,
+        "not_ready_beds": not_ready_beds,
+        "camera_occupied_beds": camera_occupied,
         "occupied_percentage": occupied_percentage,
         "active_fall_events": int(active_fall_events),
         "active_alerts": int(active_alerts),

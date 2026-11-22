@@ -892,3 +892,21 @@ def test_old_cert_without_server_auth_is_replaced(tmp_path):
     before = (tmp_path / "phone-gateway.crt").read_bytes()
     ensure_cert("192.168.1.50", str(tmp_path))
     assert (tmp_path / "phone-gateway.crt").read_bytes() != before
+
+
+def test_dashboard_bed_counts_follow_admissions_not_the_camera(client):
+    """Regression: the dashboard used camera records only, so admitted patients showed 0 occupied."""
+    before = client.get("/api/v1/dashboard/overview").json()
+    doctor = client.post("/api/v1/doctors", json={"name": "Dr. Count"}).json()["id"]
+    room = client.post("/api/v1/rooms", json={"room_number": f"DC{uuid.uuid4().hex[:4]}", "floor": "1"}).json()["id"]
+    beds = [client.post("/api/v1/beds", json={"bed_number": str(i), "room_id": room}).json()["id"] for i in (1, 2, 3)]
+    r = client.post("/api/v1/patients", json={"name": "Demo", "age": 70, "condition": "c", "doctor_id": doctor,
+                                              "room_id": room, "bed_id": beds[0]})
+    assert r.status_code == 201
+    client.patch(f"/api/v1/beds/{beds[2]}/status", json={"status": "maintenance"})
+    after = client.get("/api/v1/dashboard/overview").json()
+    assert after["total_beds"] - before["total_beds"] == 3
+    assert after["occupied_beds"] - before["occupied_beds"] == 1
+    assert after["vacant_beds"] - before["vacant_beds"] == 1
+    assert after["not_ready_beds"] - before["not_ready_beds"] == 1
+    assert "camera_occupied_beds" in after

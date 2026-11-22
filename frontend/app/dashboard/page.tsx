@@ -91,6 +91,7 @@ export default function DashboardPage() {
           <CardContent>
             <OccupancyChart data={overview} loading={overviewLoading} />
             {overview && (
+              <>
               <div className="mt-3 grid grid-cols-3 text-center text-xs text-slate-500">
                 <div>
                   <span className="block font-semibold text-slate-900 text-base">
@@ -106,11 +107,15 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <span className="block font-semibold text-amber-700 text-base">
-                    {overview.uncertain_beds}
+                    {overview.not_ready_beds}
                   </span>
-                  Uncertain
+                  Not ready
                 </div>
               </div>
+              <p className="mt-3 text-center text-[11px] text-slate-400">
+                From admissions. Cameras currently see a person in {overview.camera_occupied_beds} bed{overview.camera_occupied_beds === 1 ? "" : "s"}.
+              </p>
+              </>
             )}
           </CardContent>
         </Card>

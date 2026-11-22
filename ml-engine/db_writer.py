@@ -17,7 +17,7 @@ sys.path.insert(0, BACKEND_PATH)
 import logging
 
 from sqlmodel import Session, select
-from models import InferenceJob, OccupancyRecord, FallEvent, Alert, Bed, Room
+from models import InferenceJob, OccupancyRecord, FallEvent, Alert, Bed, Patient, Room
 from database import get_engine
 import outbox
 
@@ -98,15 +98,30 @@ def get_job_patient_id(job_id: str) -> Optional[str]:
     return None
 
 
+READY_BED_STATUSES = ("active", "available")       # "active" is the older name for available
+
+
 def get_first_bed_for_room(room_id: str) -> Optional[str]:
+    """The room's first bed by number, preferring ready beds. Any existing bed counts: a bed that is
+    being cleaned or maintained is still a real bed, so no extra default bed may be created."""
     with Session(_engine()) as s:
-        beds = s.exec(
-            select(Bed).where(Bed.room_id == uuid.UUID(room_id))
-        ).all()
-        active = [b for b in beds if b.status == "active"]
-        if active:
-            return str(active[0].id)
-    return None
+        beds = sorted(s.exec(select(Bed).where(Bed.room_id == uuid.UUID(room_id))).all(),
+                      key=lambda b: (b.bed_number, str(b.id)))
+        if not beds:
+            return None
+        ready = [b for b in beds if b.status in READY_BED_STATUSES]
+        return str((ready or beds)[0].id)
+
+
+def bed_for_session(room_id: str, patient_id: Optional[str] = None) -> Optional[str]:
+    """Bed that a live session's occupancy and fall events belong to: the monitored patient's own bed
+    when they have one in this room, otherwise the room's first bed (created only if the room has none)."""
+    if patient_id:
+        with Session(_engine()) as s:
+            patient = s.get(Patient, uuid.UUID(patient_id))
+            if patient is not None and patient.bed_id is not None and str(patient.room_id) == str(room_id):
+                return str(patient.bed_id)
+    return get_or_create_default_bed(room_id)
 
 
 DEFAULT_BED_NUMBER = "1"

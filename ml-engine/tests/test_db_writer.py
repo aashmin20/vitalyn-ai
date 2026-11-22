@@ -176,6 +176,36 @@ class TestLookups:
     def test_default_bed_unknown_room_returns_none(self, db_writer_with_test_engine):
         assert db_writer_with_test_engine.get_or_create_default_bed(str(uuid.uuid4())) is None
 
+    def test_beds_being_cleaned_are_reused_not_duplicated(self, db_writer_with_test_engine, session):
+        """Regression: after discharge a bed is 'cleaning'; a live session must not invent a new bed."""
+        room = Room(room_number=f"C{uuid.uuid4().hex[:4]}", floor="1")
+        session.add(room); session.commit(); session.refresh(room)
+        bed = Bed(bed_number="1", room_id=room.id, status="cleaning")
+        session.add(bed); session.commit(); session.refresh(bed)
+        assert db_writer_with_test_engine.get_or_create_default_bed(str(room.id)) == str(bed.id)
+        assert len(session.exec(select(Bed).where(Bed.room_id == room.id)).all()) == 1
+
+    def test_available_beds_are_ready(self, db_writer_with_test_engine, session):
+        room = Room(room_number=f"V{uuid.uuid4().hex[:4]}", floor="1")
+        session.add(room); session.commit(); session.refresh(room)
+        cleaning = Bed(bed_number="1", room_id=room.id, status="cleaning")
+        ready = Bed(bed_number="2", room_id=room.id, status="available")
+        session.add_all([cleaning, ready]); session.commit()
+        assert db_writer_with_test_engine.get_first_bed_for_room(str(room.id)) == str(ready.id)
+
+    def test_live_session_uses_the_patients_own_bed(self, db_writer_with_test_engine, session):
+        from models import Patient
+        room = Room(room_number=f"P{uuid.uuid4().hex[:4]}", floor="1")
+        session.add(room); session.commit(); session.refresh(room)
+        first = Bed(bed_number="1", room_id=room.id)
+        second = Bed(bed_number="2", room_id=room.id)
+        session.add_all([first, second]); session.commit(); session.refresh(second)
+        p = Patient(patient_code=f"P-{uuid.uuid4().hex[:6]}", name="Demo", age=70, condition="c",
+                    room_id=room.id, bed_id=second.id)
+        session.add(p); session.commit(); session.refresh(p)
+        assert db_writer_with_test_engine.bed_for_session(str(room.id), str(p.id)) == str(second.id)
+        assert db_writer_with_test_engine.bed_for_session(str(room.id), None) == str(first.id)
+
 
 # ── Occupancy records ─────────────────────────────────────────────────────────
 

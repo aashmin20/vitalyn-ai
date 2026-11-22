@@ -29,7 +29,7 @@ export function OccupancyChart({ data, loading }: Props) {
   const chartData = [
     { name: "Occupied", value: data.occupied_beds },
     { name: "Vacant", value: data.vacant_beds },
-    { name: "Uncertain", value: data.uncertain_beds },
+    { name: "Not ready", value: data.not_ready_beds },
   ].filter((d) => d.value > 0);
 
   if (chartData.length === 0) {

@@ -253,7 +253,7 @@ class LiveSession:
         self.state = "starting"
         self._cap = self._open()
         self.job_id = self._db.create_live_job(self.room_id, str(self.source), self.patient_id)
-        self.bed_id = self._db.get_or_create_default_bed(self.room_id)
+        self.bed_id = self._db.bed_for_session(self.room_id, self.patient_id)
         self.started_at = datetime.now(timezone.utc)
         self.state = "live"
         self._publish({"type": "status", "state": self.state})
