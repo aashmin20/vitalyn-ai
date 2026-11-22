@@ -27,7 +27,7 @@ from jose import JWTError, jwt
 from sqlmodel import Session, select
 
 from database import get_session
-from models import User
+from models import Doctor, User
 
 log = logging.getLogger("vitalyn.auth")
 
@@ -48,6 +48,17 @@ class AuthError(Exception):
 
 def auth_off() -> bool:
     return os.getenv("VITALYN_AUTH", "on").strip().lower() == "off"
+
+
+def auto_approve() -> bool:
+    """New and pending accounts are activated straight away (demo default). VITALYN_AUTO_APPROVE=off
+    restores the administrator-approval step."""
+    return os.getenv("VITALYN_AUTO_APPROVE", "on").strip().lower() != "off"
+
+
+def default_role() -> str:
+    role = os.getenv("VITALYN_DEFAULT_ROLE", "doctor").strip().lower()
+    return role if role in ("admin", "doctor", "nurse", "receptionist") else "doctor"
 
 
 def supabase_url() -> str:
@@ -177,24 +188,44 @@ def verify_token(token: str) -> dict:
 
 # ── the staff row behind a token ─────────────────────────────────────────────
 
-def provision_user(session: Session, claims: dict) -> User:
-    """First sight of a Supabase account: create a PENDING staff row. An admin must approve it."""
-    sub = claims.get("sub")
-    user = session.exec(select(User).where(User.auth_user_id == sub)).first()
-    if user is not None:
-        return user
-    email = (claims.get("email") or "").lower()
-    meta = claims.get("user_metadata") or {}
-    user = User(
-        name=(meta.get("full_name") or email.split("@")[0] or "Staff").strip()[:80],
-        email=email or f"{sub}@unknown.invalid",
-        auth_user_id=sub,
-        status="pending",
-        role="none",
-    )
+def activate_account(session: Session, user: User) -> User:
+    """Make a pending account usable: the first account becomes administrator (nobody else could approve
+    anyone), later ones get the default role, which an administrator can change on the Staff page."""
+    has_admin = session.exec(
+        select(User).where(User.role == "admin", User.status == "active", User.id != user.id)
+    ).first() is not None
+    user.role = default_role() if has_admin else "admin"
+    user.status = "active"
     session.add(user)
+    if user.role == "doctor" and session.exec(select(Doctor).where(Doctor.user_id == user.id)).first() is None:
+        session.add(Doctor(name=user.name, user_id=user.id))      # doctors appear in the doctor lists
     session.commit()
     session.refresh(user)
+    log.info("Activated account %s as %s", user.email, user.role)
+    return user
+
+
+def provision_user(session: Session, claims: dict) -> User:
+    """First sight of a Supabase account: create its staff row. With auto-approval (default) it is active
+    at once; with VITALYN_AUTO_APPROVE=off it stays PENDING until an administrator approves it.
+    Disabled accounts are never re-activated."""
+    sub = claims.get("sub")
+    user = session.exec(select(User).where(User.auth_user_id == sub)).first()
+    if user is None:
+        email = (claims.get("email") or "").lower()
+        meta = claims.get("user_metadata") or {}
+        user = User(
+            name=(meta.get("full_name") or email.split("@")[0] or "Staff").strip()[:80],
+            email=email or f"{sub}@unknown.invalid",
+            auth_user_id=sub,
+            status="pending",
+            role="none",
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    if user.status == "pending" and auto_approve():
+        user = activate_account(session, user)
     return user
 
 

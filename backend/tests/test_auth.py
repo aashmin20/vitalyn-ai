@@ -339,3 +339,37 @@ def test_audit_log_filters(env):
     rows = env.get("/api/v1/audit", params={"actor": admin["email"].upper()}, headers=bearer(admin)).json()
     assert rows and all(r["actor_email"] == admin["email"] for r in rows)
     assert env.get("/api/v1/audit", params={"action": "nothing."}, headers=bearer(admin)).json() == []
+
+
+
+# ── auto-approval (the demo default) ─────────────────────────────────────────
+
+def test_auto_approval_makes_the_first_account_admin_and_later_ones_doctors(env, monkeypatch):
+    monkeypatch.setenv("VITALYN_AUTO_APPROVE", "on")
+    first = make_token(str(uuid.uuid4()), "first@hospital.test")
+    me = env.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {first}"}).json()
+    assert (me["status"], me["role"]) == ("active", "admin")
+    second = make_token(str(uuid.uuid4()), "second@hospital.test", full_name="Dr Second")
+    me2 = env.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {second}"}).json()
+    assert (me2["status"], me2["role"]) == ("active", "doctor")
+    assert env.get("/api/v1/patients", headers={"Authorization": f"Bearer {second}"}).status_code == 200
+    doctors = env.get("/api/v1/doctors", headers={"Authorization": f"Bearer {second}"}).json()
+    assert any(d["name"] == "Dr Second" for d in doctors)
+
+
+def test_auto_approval_activates_an_existing_pending_account_but_never_a_disabled_one(env, monkeypatch):
+    add_user(env, "admin")
+    pending, disabled = add_user(env, "none", "pending"), add_user(env, "nurse", "disabled")
+    monkeypatch.setenv("VITALYN_AUTO_APPROVE", "on")
+    monkeypatch.setenv("VITALYN_DEFAULT_ROLE", "nurse")
+    me = env.get("/api/v1/auth/me", headers=bearer(pending)).json()
+    assert (me["status"], me["role"]) == ("active", "nurse")
+    assert env.get("/api/v1/patients", headers=bearer(disabled)).status_code == 403
+
+
+def test_signup_message_says_you_can_sign_in_with_auto_approval(env, monkeypatch):
+    monkeypatch.setenv("VITALYN_AUTO_APPROVE", "on")
+    fake_supabase(monkeypatch, sub=str(uuid.uuid4()), email="quick@hospital.test")
+    r = env.post("/api/v1/auth/signup", json={"full_name": "Quick Start", "email": "quick@hospital.test", "password": "longenough1"},
+                 headers={"X-Requested-With": "vitalyn"})
+    assert r.status_code == 201 and "sign in now" in r.json()["message"]

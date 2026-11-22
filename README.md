@@ -135,8 +135,9 @@ Development in progress.
 HMS phase 1: first-time setup
 
 1. `python3 scripts/set_supabase_auth.py` (Supabase project URL and the public anon key; never the secret key).
-2. Start the backend and frontend, open the app and create your account on the Sign up page.
-3. `python3 scripts/make_admin.py you@example.com` promotes it to administrator; sign in again.
-4. Approve other staff and assign roles under Administration, Staff.
+2. Start the backend and frontend, open the app and create your account on the Sign up page. You can
+   sign in at once: the first account becomes administrator, later ones get the doctor role.
+3. Change roles (nurse, receptionist, admin) or disable accounts under Administration, Staff.
+   Set `VITALYN_AUTO_APPROVE=off` in backend/.env to require administrator approval instead.
 
 Demo and academic prototype only. Use fictional patients. Not clinically validated and not a compliance claim.

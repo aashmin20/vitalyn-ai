@@ -11,7 +11,8 @@ import { useAuth } from "./AuthProvider";
 const PUBLIC_PATHS = ["/login", "/signup"];
 const LANDING = "/";                 // public for everyone, full-bleed, no app chrome
 
-/** Signed-out visitors see only the login/sign-up pages; pending accounts see a waiting screen. */
+/** Signed-out visitors see only the login/sign-up pages. A waiting screen appears only when the backend
+ * runs with VITALYN_AUTO_APPROVE=off (accounts are otherwise active at once), or for disabled accounts. */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut, refreshUser } = useAuth();
   const pathname = usePathname();

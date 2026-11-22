@@ -2,7 +2,8 @@
 Sign up, sign in, refresh and sign out, proxied to Supabase Auth.
 
 The browser never sees the Supabase tokens: they are stored in httpOnly cookies, so page scripts
-cannot read them. New accounts are PENDING until an administrator approves them.
+cannot read them. New accounts are active at once (auto-approval, the default) or PENDING until an
+administrator approves them when VITALYN_AUTO_APPROVE=off.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from sqlmodel import Session
 
 import audit
 from auth import (
-    ACCESS_COOKIE, REFRESH_COOKIE, AuthUser, auth_configured, auth_off, current_identity,
+    ACCESS_COOKIE, REFRESH_COOKIE, AuthUser, auth_configured, auth_off, auto_approve, current_identity,
     provision_user, supabase_request,
 )
 from database import get_session
@@ -104,6 +105,8 @@ def signup(body: SignupBody, request: Request, session: Session = Depends(get_se
                                        "user_metadata": {"full_name": body.full_name.strip()}})
         audit.record(session, None, "auth.signup", "user", row.id, body.email, request)
         session.commit()
+    if auto_approve():
+        return {"message": "Account created. You can sign in now."}
     return {"message": "Account created. An administrator must approve it before you can use VITALYN."}
 
 

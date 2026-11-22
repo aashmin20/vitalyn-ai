@@ -11,6 +11,8 @@ _tmp = tempfile.mkdtemp(prefix="vitalyn-tests-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test_app.db"
 os.environ["VITALYN_OUTBOX_PATH"] = os.path.join(_tmp, "outbox.db")
 os.environ.pop("VITALYN_PHONE_GATEWAY", None)
+# Most auth tests exercise the administrator-approval flow; auto-approval has its own tests.
+os.environ["VITALYN_AUTO_APPROVE"] = "off"
 
 
 # ── authentication in tests ──────────────────────────────────────────────────

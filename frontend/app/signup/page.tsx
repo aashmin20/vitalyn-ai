@@ -34,7 +34,7 @@ export default function SignupPage() {
     <AuthLayout
       kicker="New staff account"
       title="Join your ward."
-      subtitle="Create an account. An administrator approves it and gives you a role before you can use Vitalyn."
+      subtitle="Create an account and sign in straight away. An administrator can change your role later."
     >
       {done ? (
         <div className="space-y-6">
