@@ -38,17 +38,20 @@ KPT_CONF_MIN = 0.3
 
 @dataclass
 class ContextConfig:
+    # Defaults: min_drop, min_speed, settle_samples and settle_tol were chosen on the FallVision DEV
+    # split (fall_eval.py tune). anchor="max" was chosen because "bottom" alone missed most standing
+    # falls in the IKAR videos (feet are already on the floor). See docs/evaluation/FALL_DETECTION_IMPROVEMENT.md.
     window: int = 48                  # samples of history used for the reference level (about 8 s at 6 Hz)
     reference_gap: int = 12           # the newest samples are excluded from the reference level
-    min_drop: float = 1.0             # body-scales the body must end up lower than the resting level
-    min_speed: float = 0.6            # body-scales of descent that must happen within speed_span
+    min_drop: float = 0.7             # body-scales the body must end up lower than the resting level
+    min_speed: float = 0.3            # body-scales of descent that must happen within speed_span
     speed_span: int = 12              # samples
-    settle_samples: int = 6           # consecutive samples that must stay low and still
-    settle_tol: float = 0.45          # max height movement (body-scales) while settled
+    settle_samples: int = 4           # consecutive samples that must stay low and still
+    settle_tol: float = 0.7           # max height movement (body-scales) while settled
     min_valid: int = 4                # valid samples needed in the reference window
     cooldown: int = 60                # samples after an alert (10 s at 6 Hz)
     smooth: int = 3                   # median filter length on the per-sample height
-    anchor: str = "bottom"            # "bottom" (lowest confident keypoint) or "centre"
+    anchor: str = "max"               # "bottom" (lowest keypoint), "centre" (mean keypoint) or "max" (larger drop of the two)
     bed_overlap_suppress: float = 0.6  # share of the body inside the bed box that counts as "in bed"
 
 
@@ -106,14 +109,46 @@ class ContextualFallDetector:
 
     def reset(self) -> None:
         c = self.cfg
-        self._y: Deque[float] = deque(maxlen=c.window)        # smoothed anchor height, NaN when unknown
-        self._raw: Deque[float] = deque(maxlen=max(1, c.smooth))
+        anchors = ("bottom", "centre") if c.anchor == "max" else (c.anchor,)
+        self._ys: Dict[str, Deque[float]] = {a: deque(maxlen=c.window) for a in anchors}   # smoothed heights
+        self._raws: Dict[str, Deque[float]] = {a: deque(maxlen=max(1, c.smooth)) for a in anchors}
         self._scale: Deque[float] = deque(maxlen=c.window)
         self._in_bed: Deque[Optional[float]] = deque(maxlen=c.window)
         self._cooldown = 0
         self._latched = False                                  # one alert per descent
 
     # ---- helpers ----------------------------------------------------------------------
+    def _evaluate(self, y: np.ndarray, L: float):
+        """(drop, speed) if this height track shows a fast descent that has settled low, "low" if the
+        body is low but not (yet) a qualifying fall, or None if it is not low at all."""
+        c = self.cfg
+        n = len(y)
+        if n < c.reference_gap + c.settle_samples:
+            return None
+        recent = y[-c.settle_samples:]
+        if np.any(np.isnan(recent)):
+            return None
+        older = y[: n - c.reference_gap]
+        older = older[~np.isnan(older)]
+        if len(older) < c.min_valid:
+            return None
+        drop = (float(np.median(recent)) - float(np.median(older))) / L          # image y grows downwards
+        if drop < c.min_drop:
+            return None
+        if (recent.max() - recent.min()) / L > c.settle_tol:                    # still moving: not settled
+            return "low"
+        speed = 0.0
+        for i in range(n - 1):
+            if np.isnan(y[i]):
+                continue
+            w = y[i + 1: i + 1 + c.speed_span]
+            w = w[~np.isnan(w)]
+            if len(w):
+                speed = max(speed, (float(w.max()) - float(y[i])) / L)
+        if speed < c.min_speed:
+            return "low"                                                         # slow: deliberate, not a fall
+        return (drop, speed)
+
     def _body_scale(self) -> Optional[float]:
         s = [v for v in self._scale if v and v > 0]
         return float(np.median(s)) if len(s) >= 3 else None
@@ -123,14 +158,16 @@ class ContextualFallDetector:
         c = self.cfg
         m = body_measures(kpts)
         if m is None:
-            self._raw.append(np.nan)
-            self._y.append(np.nan)
+            for a in self._ys:
+                self._raws[a].append(np.nan)
+                self._ys[a].append(np.nan)
             self._scale.append(np.nan)
             self._in_bed.append(None)
         else:
-            self._raw.append(m[c.anchor])
-            vals = [v for v in self._raw if not np.isnan(v)]
-            self._y.append(float(np.median(vals)))
+            for a in self._ys:
+                self._raws[a].append(m[a])
+                vals = [v for v in self._raws[a] if not np.isnan(v)]
+                self._ys[a].append(float(np.median(vals)))
             scale = m["torso"] if m["torso"] >= 8 else 0.45 * m["box_h"]
             self._scale.append(max(scale, 1.0))
             self._in_bed.append(box_overlap(m["box"], bed_zone) if bed_zone is not None else None)
@@ -138,45 +175,23 @@ class ContextualFallDetector:
         if self._cooldown > 0:
             self._cooldown -= 1
             return None
-        n = len(self._y)
-        if n < c.reference_gap + c.settle_samples:
-            return None
-        y = np.array(self._y, dtype=float)
         L = self._body_scale()
         if L is None:
             return None
-
-        recent = y[-c.settle_samples:]
-        if np.any(np.isnan(recent)):
+        best: Optional[Tuple[float, float]] = None
+        any_low = False
+        for a in self._ys:
+            res = self._evaluate(np.array(self._ys[a], dtype=float), L)
+            if res == "low":
+                any_low = True
+            elif isinstance(res, tuple) and (best is None or res[0] > best[0]):
+                best = res
+        if not any_low and best is None:
+            self._latched = False            # nobody is low any more: the next descent may alert again
+        if best is None or self._latched:
             return None
-        older = y[: n - c.reference_gap]
-        older = older[~np.isnan(older)]
-        if len(older) < c.min_valid:
-            return None
-
-        reference = float(np.median(older))
-        level = float(np.median(recent))
-        drop = (level - reference) / L                                   # image y grows downwards
-        if drop < c.min_drop:
-            self._latched = False
-            return None
-        if self._latched:
-            return None
-        if (recent.max() - recent.min()) / L > c.settle_tol:             # still moving: not settled yet
-            return None
-
-        # How fast did the descent happen? Largest rise of y within speed_span samples.
-        span = c.speed_span
-        speed = 0.0
-        for i in range(n - 1):
-            if np.isnan(y[i]):
-                continue
-            w = y[i + 1: i + 1 + span]
-            w = w[~np.isnan(w)]
-            if len(w):
-                speed = max(speed, (float(w.max()) - float(y[i])) / L)
-        if speed < c.min_speed:
-            return None                                                  # slow movement: deliberate, not a fall
+        drop, speed = best
+        n = len(self._in_bed)
 
         reasons: Dict[str, float] = {}
         overlap = [v for v in list(self._in_bed)[-c.settle_samples:] if v is not None]
@@ -196,3 +211,44 @@ class ContextualFallDetector:
         self._latched = True
         self._cooldown = c.cooldown
         return ContextSignal(score=round(float(score), 4), drop=round(drop, 3), speed=round(speed, 3), reasons=reasons)
+
+
+# ── calibrated confidence and the pipeline-facing wrapper ─────────────────────────────
+
+# Logistic calibration of the heuristic score, fitted on the DEV split of FallVision alerts
+# (fall_eval.py calibrate). It estimates how often an alert like this was a real fall on that data.
+# It is NOT a clinical probability and will differ on other cameras and rooms.
+# Fit: 155 DEV alerts (66% in fall clips). TEST: 81 alerts, Brier 0.257 (raw) -> 0.211 (calibrated).
+# The slope is small, so the score separates real from false alerts only weakly: the calibrated
+# value is close to the overall share of real alerts (about two in three).
+CAL_A = 0.1927
+CAL_B = 0.5724
+
+
+def calibrated(score: float) -> float:
+    if CAL_A is None or CAL_B is None:
+        return round(float(score), 4)
+    return round(float(1.0 / (1.0 + np.exp(-(CAL_A * score + CAL_B)))), 4)
+
+
+class RuleFallDetector:
+    """The rule-based check the live and batch pipelines run beside the BiLSTM.
+
+    update(pixel_keypoints) -> (confidence, source) on a new potential fall, else None.
+    mode "context" uses ContextualFallDetector; "legacy" uses the old posture-transition rule.
+    """
+
+    def __init__(self, mode: str = "context", cfg: Optional[ContextConfig] = None):
+        from fall_heuristic import PostureTransitionDetector, person_box
+        self.mode = mode if mode in ("context", "legacy") else "context"
+        self._context = ContextualFallDetector(cfg)
+        self._legacy = PostureTransitionDetector()
+        self._box = person_box
+
+    def update(self, kpts: Optional[np.ndarray]) -> Optional[Tuple[float, str]]:
+        if self.mode == "legacy":
+            ar, h = self._box(kpts, KPT_CONF_MIN)
+            fired, conf = self._legacy.update(ar, h)
+            return (conf, "heuristic") if fired else None
+        sig = self._context.update(kpts)
+        return (calibrated(sig.score), "context") if sig is not None else None

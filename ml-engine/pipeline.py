@@ -40,7 +40,8 @@ sys.path.insert(0, BACKEND_PATH)
 
 from pose_extractor import PoseExtractor, TARGET_SEQ_LEN, SAMPLE_FPS
 from bilstm_model import FallClassifier
-from fall_heuristic import PostureTransitionDetector, person_box
+from fall_context import RuleFallDetector
+from config import FALL_RULE
 from db_writer import (
     mark_job_started,
     mark_job_completed,
@@ -143,7 +144,7 @@ def _run(job_id: str, video_path: str) -> bool:
 
     pose        = PoseExtractor()
     clf         = FallClassifier()
-    ar_detector = PostureTransitionDetector()
+    rule_detector = RuleFallDetector(FALL_RULE)
 
     room_id = get_job_room_id(job_id)
     patient_id = get_job_patient_id(job_id)
@@ -181,19 +182,17 @@ def _run(job_id: str, video_path: str) -> bool:
             keypoint_stream.append(np.zeros(34, dtype=np.float32))
             occupancy_frames.append(_OccupancyFrame("vacant", 0.90))
 
-        # Posture box from *pixel* keypoints (the normalised vector would distort
-        # the aspect ratio by the video's own width/height).
-        ar, box_h = person_box(pix)
-
-        # Heuristic fall check per frame
-        is_ar_fall, ar_conf = ar_detector.update(ar, box_h)
-        if is_ar_fall:
+        # Rule-based fall check per frame on *pixel* keypoints (context detector by default,
+        # VITALYN_FALL_RULE=legacy for the older posture rule).
+        rule = rule_detector.update(pix if kp is not None else None)
+        if rule is not None:
+            ar_conf, source = rule
             ar_fall_events.append(_FallEvent(
                 start_frame=max(0, sampled - 4),
                 end_frame=sampled,
                 confidence=ar_conf,
             ))
-            log.info("Posture-transition fall detected at sampled frame %d (conf=%.2f)", sampled, ar_conf)
+            log.info("Rule-based (%s) fall detected at sampled frame %d (conf=%.2f)", source, sampled, ar_conf)
 
     cap.release()
 

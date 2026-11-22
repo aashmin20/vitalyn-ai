@@ -1,0 +1,69 @@
+# Fall detection improvement: method and measured results
+
+Reproduce everything below with `cd ml-engine && python3 fall_eval.py report` (and `tune`, `calibrate`,
+`extract-ikar`). No number here is estimated or copied from elsewhere.
+
+## What changed
+The architecture is unchanged: YOLOv8n-pose -> 17 keypoints -> streaming BiLSTM **plus** one rule-based
+check, both able to raise a *potential* fall for human review. Only the rule-based check changed:
+
+| | Before | After (default) |
+|---|---|---|
+| Rule | Posture transition: upright -> horizontal with height collapse (`fall_heuristic.py`) | Context detector (`fall_context.py`) |
+| Posture | box aspect ratio | body height relative to its own resting level, using body-relative units (torso length) |
+| Movement | upright-to-horizontal within ~2 s | descent of >= 0.3 body-lengths within 12 samples (~2 s) |
+| Location | none | body must end >= 0.7 body-lengths lower than where it was resting (bed level); optional bed zone suppresses "lying in the bed" |
+| Consecutive frames | 3 horizontal samples | must then stay low and still for 4 consecutive samples; a dip that recovers is ignored |
+| Frame noise | none | 3-sample median smoothing, low-confidence keypoints ignored |
+| Confidence | heuristic 0.5-0.9 | logistic calibration fitted on dev alerts |
+
+`VITALYN_FALL_RULE=legacy` switches back to the old rule. The BiLSTM still runs in both modes.
+
+## Data and protocol
+* **FallVision bed subset** (keypoint CSVs, 243 fall clips, 373 non-fall clips: lying, sleeping, sitting,
+  changing position on a bed). Deterministic split by clip name: **dev 407** clips (158 fall), **test 209** (85 fall).
+  Settings were searched on dev only (216 combinations); test was scored after the choice.
+* **IKAR** (278 standing-fall videos: trips, slips, faintings, blackouts; falls only). Poses extracted with
+  the same YOLOv8n-pose at 6 samples/second. Used to check standing falls, which FallVision does not contain.
+* A clip counts as detected if at least one alert is raised in it. False alerts per hour assume one CSV
+  frame = one analysis sample at 6 Hz (the CSVs do not store their frame rate).
+
+## Results on the held-out FallVision test split (209 clips)
+
+| Method | Precision | Recall | F1 | Non-fall clips with an alert | False alerts / hour |
+|---|---|---|---|---|---|
+| Live logic before (BiLSTM + posture rule) | 0.289 | 0.129 | 0.179 | 21.8% | 42.8 |
+| **New default (BiLSTM + context detector)** | **0.692** | **0.635** | **0.663** | **19.4%** | **38.0** |
+| Context + old posture rule together | 0.567 | 0.694 | 0.624 | 36.3% | 71.3 |
+
+The BiLSTM raised **no alerts at all** on these clips, alone or combined, so every alert above comes from
+the rule-based check. Adding the old posture rule back raises recall slightly but almost doubles false alerts.
+
+## Standing falls (IKAR, 278 videos, recall only)
+
+| Method | Falls detected |
+|---|---|
+| Live logic before | 192 / 278 (69.1%) |
+| Context detector, lowest-point anchor only | 51 / 278 (18.3%) |
+| **New default (combined lowest-point + body-centre anchor)** | **211 / 278 (75.9%)** |
+
+IKAR was used to choose the anchor (the lowest-point anchor misses standing falls because the feet are
+already on the floor), so these figures are not a held-out estimate.
+
+## Calibration
+Fitted on 155 dev alerts: `p = sigmoid(0.1927 * score + 0.5724)`. On 81 test alerts the Brier score fell
+from 0.257 (raw score) to 0.211. The slope is small: the score separates real from false alerts only
+weakly, so the confidence shown to staff is close to "about 2 in 3 alerts like this were real falls in the
+development data". It is not a clinical probability.
+
+## Limitations (read before any claim)
+* Not clinically validated. Every alert remains a potential event for staff review.
+* The BiLSTM's training clips are unknown; it contributes no alerts on this data.
+* False alerts per hour fell only slightly (42.8 -> 38.0). The big change is precision and recall.
+* The bed-zone rule needs a bed rectangle, which the datasets do not have, so it is unit-tested only.
+* "Lower in the image" means closer to the floor for side or angled cameras; it is weak for a camera
+  pointing straight down.
+* Timing thresholds are in samples (6 per second live). The CSV frame rate is unknown, so live timing may differ.
+* Known trade-off: lowering oneself all the way to the floor slowly can still alert (tested in
+  `tests/test_fall_context.py`). Slow position changes at bed level do not.
+* Real-camera validation on site has not been done.

@@ -35,7 +35,8 @@ import numpy as np
 
 from pose_extractor import PoseExtractor, SAMPLE_FPS
 from bilstm_model import FallClassifier
-from fall_heuristic import PostureTransitionDetector, person_box
+from fall_context import RuleFallDetector
+from config import FALL_RULE
 from streaming_detector import StreamingFallDetector, TARGET_SEQ_LEN
 import db_writer
 
@@ -215,7 +216,7 @@ class LiveSession:
 
         self._detector = detector or StreamingFallDetector(self._clf)
         self._sample_fps = sample_fps
-        self._ar = PostureTransitionDetector()
+        self._rules = RuleFallDetector(FALL_RULE)
 
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
@@ -428,10 +429,9 @@ class LiveSession:
             if signal is not None:
                 self._raise_fall(signal.confidence, "bilstm")
 
-            ar, box_h = person_box(pix, KPT_CONF_MIN)
-            is_ar, ar_conf = self._ar.update(ar, box_h)
-            if is_ar:
-                self._raise_fall(ar_conf, "heuristic")
+            rule = self._rules.update(pix if person else None)
+            if rule is not None:
+                self._raise_fall(*rule)
 
             now = time.monotonic()
             n_fps += 1

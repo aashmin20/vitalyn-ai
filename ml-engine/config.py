@@ -47,6 +47,12 @@ FALL_MIN_CONSECUTIVE_WINDOWS = int(os.getenv("VITALYN_FALL_MIN_WIN", "2"))
 # coverage are not classified at all.
 MIN_PERSON_COVERAGE = float(os.getenv("VITALYN_MIN_PERSON_COVERAGE", "0.8"))
 
+# Which rule-based fall check runs beside the BiLSTM:
+#   "context" (default) - descent below the resting level, then settling (fall_context.py)
+#   "legacy"            - the older upright-to-horizontal posture rule (fall_heuristic.py)
+# See docs/evaluation/FALL_DETECTION_IMPROVEMENT.md for the measured difference.
+FALL_RULE = os.getenv("VITALYN_FALL_RULE", "context").strip().lower()
+
 # After a fall event fires, skip this many windows before allowing another
 FALL_COOLDOWN_WINDOWS = int(os.getenv("VITALYN_FALL_COOLDOWN", "4"))
 

@@ -93,6 +93,51 @@ def to_vector(k: Optional[np.ndarray]) -> np.ndarray:
     return (k[:, :2] / FRAME_SIZE).reshape(-1).astype(np.float32)
 
 
+# ── IKAR standing falls (videos, falls only): pose extracted once, cached ──────────────────
+
+IKAR_DIR = os.path.join(HERE, "..", "datasets", "doi-10", "IKAR_dataset")
+IKAR_CACHE = os.path.join(HERE, "..", "datasets", "processed", "ikar_keypoints.npz")
+
+
+def extract_ikar() -> None:
+    """Run YOLOv8n-pose at 6 samples/second over every IKAR video (like the live pipeline) and cache
+    the pixel keypoints. Slow the first time; later runs read the cache."""
+    import cv2
+    from pose_extractor import PoseExtractor
+    pose = PoseExtractor()
+    out = {}
+    videos = sorted(glob.glob(os.path.join(IKAR_DIR, "*", "videos", "*.mp4")))
+    for n, path in enumerate(videos, 1):
+        cap = cv2.VideoCapture(path)
+        step = max(1, round((cap.get(cv2.CAP_PROP_FPS) or 30.0) / SAMPLE_HZ))
+        frames, idx = [], 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if idx % step == 0:
+                _, pix = pose.extract_frame_detailed(frame)
+                frames.append(np.zeros((17, 3)) if pix is None else np.asarray(pix, dtype=float))
+            idx += 1
+        cap.release()
+        out[os.path.basename(path)] = np.stack(frames) if frames else np.zeros((0, 17, 3))
+        if n % 25 == 0:
+            print(f"  {n}/{len(videos)} videos", flush=True)
+    os.makedirs(os.path.dirname(IKAR_CACHE), exist_ok=True)
+    np.savez_compressed(IKAR_CACHE, **out)
+    print(f"cached {len(out)} videos -> {IKAR_CACHE}")
+
+
+def load_ikar() -> List[Clip]:
+    data = np.load(IKAR_CACHE)
+    clips = []
+    for name in sorted(data.files):
+        arr = data[name]
+        kpts = [None if not np.any(f[:, :2]) else f for f in arr]
+        clips.append(Clip(name, 1, kpts, "ikar"))
+    return clips
+
+
 # ── detectors: clip -> list of alert sample indices ──────────────────────────
 
 Detector = Callable[[Clip], List[int]]
@@ -150,6 +195,24 @@ def context_detector(cfg=None, min_score: float = 0.0) -> Detector:
         return merge_alerts(alerts)
 
     return run
+
+
+def scored_context_alerts(clip: Clip, cfg=None) -> List[float]:
+    """Raw scores of every alert the context detector raises in a clip (after the 10 s merge)."""
+    from fall_context import ContextualFallDetector
+    det = ContextualFallDetector(cfg)
+    hits = []
+    for i, k in enumerate(clip.kpts):
+        sig = det.update(k)
+        if sig is not None:
+            hits.append((i, sig.score))
+    kept = set(merge_alerts([i for i, _ in hits]))
+    return [sc for i, sc in hits if i in kept]
+
+
+def union(*detectors: Detector) -> Detector:
+    """Alert when any of the detectors alerts (the live pipeline raises on any source)."""
+    return lambda clip: merge_alerts([a for d in detectors for a in d(clip)])
 
 
 def bilstm_only(clip: Clip) -> List[int]:
@@ -231,7 +294,7 @@ def main(argv: List[str]) -> int:
         from fall_context import ContextConfig
         base = ContextConfig()
         grid = {
-            "min_drop": [0.6, 0.8, 1.0, 1.3, 1.6],
+            "min_drop": [0.7, 1.0, 1.3],
             "min_speed": [0.3, 0.45, 0.6, 0.8],
             "settle_samples": [4, 6, 9],
             "settle_tol": [0.3, 0.45, 0.7],
@@ -249,6 +312,37 @@ def main(argv: List[str]) -> int:
         best = rows[0][2]
         print("chosen (dev):", json.dumps(best))
         print(fmt("context tuned [TEST]", evaluate(test, context_detector(replace(base, **best)))))
+        return 0
+    if mode == "extract-ikar":
+        extract_ikar()
+        return 0
+    if mode == "report":
+        # Final comparison with the settings now in ContextConfig (chosen on DEV), scored on TEST.
+        for label, det in (("baseline (live logic today)", baseline_detector),
+                           ("context detector", context_detector()),
+                           ("context + posture rule", union(context_detector(), posture_only)),
+                           ("context + BiLSTM", union(context_detector(), bilstm_only))):
+            for name, subset in (("dev", dev), ("TEST", test)):
+                print(fmt(f"{label} [{name}]", evaluate(subset, det)))
+        return 0
+    if mode == "calibrate":
+        # Alert-level calibration: is an alert raised in a fall clip? Fit on DEV, check on TEST.
+        from sklearn.linear_model import LogisticRegression
+        def rows(subset):
+            X, y = [], []
+            for c in subset:
+                for sc in scored_context_alerts(c):
+                    X.append([sc]); y.append(c.label)
+            return np.array(X), np.array(y)
+        Xd, yd = rows(dev); Xt, yt = rows(test)
+        lr = LogisticRegression().fit(Xd, yd)
+        a, b = float(lr.coef_[0][0]), float(lr.intercept_[0])
+        pt = lr.predict_proba(Xt)[:, 1]
+        brier_raw = float(np.mean((Xt[:, 0] - yt) ** 2)); brier_cal = float(np.mean((pt - yt) ** 2))
+        print(f"alerts: dev {len(yd)} ({yd.mean():.2f} real), test {len(yt)} ({yt.mean():.2f} real)")
+        print(f"calibration fit on DEV: p = sigmoid({a:.4f} * score + {b:.4f})")
+        print(f"TEST Brier score: raw score {brier_raw:.4f}  calibrated {brier_cal:.4f}  (lower is better)")
+        print(f"TEST mean predicted {pt.mean():.3f} vs observed {yt.mean():.3f}")
         return 0
     print("unknown mode")
     return 1
