@@ -124,6 +124,18 @@ export interface LiveFallEvent {
   detected_at: string;
 }
 
+/** Three-way status from the live session. Percentages are the BiLSTM's own output, or null when the
+ *  model has no valid prediction (never estimated). */
+export interface FallAssessment {
+  code: "normal" | "uncertain" | "potential_fall";
+  label: string;
+  fall_confidence: number | null;
+  normal_confidence: number | null;
+  reason: string;
+  source: string;
+  raised_by?: string | null;
+}
+
 export interface LiveStatus {
   state: "idle" | "starting" | "live" | "stopped" | "error";
   source?: string;
@@ -139,6 +151,9 @@ export interface LiveStatus {
   window_required?: number;
   last_probability?: number | null;
   model_guarded?: boolean;
+  assessment?: FallAssessment;
+  retrained_model?: boolean;
+  alerts_held_back?: number;
   patient_id?: string | null;
   patient?: { patient_code: string; room_number: string | null };
   sessions?: LiveStatus[];

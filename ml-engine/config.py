@@ -60,6 +60,10 @@ MIN_PERSON_COVERAGE = float(os.getenv("VITALYN_MIN_PERSON_COVERAGE", "0.8"))
 # See docs/evaluation/FALL_DETECTION_IMPROVEMENT.md for the measured difference.
 FALL_RULE = os.getenv("VITALYN_FALL_RULE", "context").strip().lower()
 
+# Hold a rule-based alert back when the (retrained) BiLSTM sees the person and is confident it is normal:
+# fall probability below this. Chosen on the validation clips; 0 disables it.
+FALL_RULE_VETO = float(os.getenv("VITALYN_FALL_RULE_VETO", "0.10" if USING_RETRAINED_BILSTM else "0"))
+
 # After a fall event fires, skip this many windows before allowing another
 FALL_COOLDOWN_WINDOWS = int(os.getenv("VITALYN_FALL_COOLDOWN", "4"))
 

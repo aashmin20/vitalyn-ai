@@ -36,7 +36,8 @@ import numpy as np
 from pose_extractor import PoseExtractor, SAMPLE_FPS
 from bilstm_model import FallClassifier
 from fall_context import RuleFallDetector
-from config import FALL_RULE
+from live_status import StatusTracker
+from config import FALL_RULE, FALL_RULE_VETO, FALL_THRESHOLD, USING_RETRAINED_BILSTM
 from streaming_detector import StreamingFallDetector, TARGET_SEQ_LEN
 import db_writer
 
@@ -216,7 +217,9 @@ class LiveSession:
 
         self._detector = detector or StreamingFallDetector(self._clf)
         self._sample_fps = sample_fps
-        self._rules = RuleFallDetector(FALL_RULE)
+        self._rules = RuleFallDetector(FALL_RULE, veto_below=FALL_RULE_VETO)
+        self._assess = StatusTracker(FALL_THRESHOLD)
+        self._windows_seen = 0
 
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
@@ -251,6 +254,9 @@ class LiveSession:
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     def start(self) -> None:
+        if not USING_RETRAINED_BILSTM:
+            log.warning("Retrained BiLSTM weights (vitalyn_fall_bilstm_v2.pt) not found: using the ORIGINAL "
+                        "checkpoint. Run `python3 ml-engine/train_bilstm.py` to recreate them.")
         self.state = "starting"
         self._cap = self._open()
         self.job_id = self._db.create_live_job(self.room_id, str(self.source), self.patient_id)
@@ -381,8 +387,11 @@ class LiveSession:
         return getattr(self._detector, "_seq_len", TARGET_SEQ_LEN)
 
     def _status_text(self, alarm: bool) -> str:
+        a = self._assess.last
         if alarm:
-            return "POTENTIAL FALL - human review required"
+            return "POTENTIAL FALL DETECTED - human review required"
+        if a.get("fall_confidence") is not None:
+            return f"{a['label']} | fall {a['fall_confidence']:.0f}% / normal {a['normal_confidence']:.0f}%"
         if not self._detector.ready:
             return (f"Warming up {self._detector.window_fill}/{self._detector_len()}"
                     f" | {'person' if self._person else 'no person'}")
@@ -428,10 +437,21 @@ class LiveSession:
             signal = self._detector.push(vec if person else np.zeros(34, dtype=np.float32))
             if signal is not None:
                 self._raise_fall(signal.confidence, "bilstm")
+            # A new window was evaluated when the detector's evaluation counter restarts.
+            if getattr(self._detector, "_since_eval", 0) == 1 and self._detector.ready:
+                self._assess.add_window(self._detector.last_probability)
 
-            rule = self._rules.update(pix if person else None)
+            rule = self._rules.update(pix if person else None, self._detector.last_probability)
             if rule is not None:
                 self._raise_fall(*rule)
+
+            with self._lock:
+                alarm = time.monotonic() < self._alarm_until
+            self._assess.assess(
+                alarm=alarm, ready=self._detector.ready, guarded=bool(getattr(self._detector, "guarded", False)),
+                person=person, body_low=self._rules.body_low,
+                alarm_source=(self.last_event or {}).get("source"),
+            )
 
             now = time.monotonic()
             n_fps += 1
@@ -557,6 +577,9 @@ class LiveSession:
             "window_required": self._detector_len(),
             "last_probability": self._detector.last_probability,
             "model_guarded": bool(getattr(self._detector, "guarded", False)),
+            "assessment": self._assess.last,
+            "retrained_model": USING_RETRAINED_BILSTM,
+            "alerts_held_back": self._rules.vetoed,
             "events_count": self.events_count,
             "last_event": self.last_event,
             "error": self.error,

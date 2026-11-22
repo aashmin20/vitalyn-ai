@@ -236,6 +236,23 @@ V2_WEIGHTS = os.path.join(HERE, "vitalyn_fall_bilstm_v2.pt")
 _v2 = None
 
 
+def shipped_detector(clip: Clip) -> List[int]:
+    """Exactly what the live pipeline runs by default: retrained BiLSTM + context rule, with the rule held
+    back when the BiLSTM sees the person and its fall probability is below FALL_RULE_VETO."""
+    global _v2
+    from config import FALL_RULE_VETO
+    from fall_context import RuleFallDetector
+    from streaming_detector import StreamingFallDetector
+    bilstm_v2_only(Clip("", 0, []))                      # make sure the retrained classifier is loaded
+    stream, rules, out = StreamingFallDetector(_v2), RuleFallDetector("context", veto_below=FALL_RULE_VETO), []
+    for i, k in enumerate(clip.kpts):
+        if stream.push(to_vector(k, clip.size)) is not None:
+            out.append(i)
+        if rules.update(k, stream.last_probability) is not None:
+            out.append(i)
+    return merge_alerts(out)
+
+
 def bilstm_v2_only(clip: Clip) -> List[int]:
     """The retrained BiLSTM (train_bilstm.py) with its validation-chosen threshold, live decision rules."""
     global _v2
@@ -349,7 +366,8 @@ def main(argv: List[str]) -> int:
                            ("context detector", context_detector()),
                            ("context + posture rule", union(context_detector(), posture_only)),
                            ("context + original BiLSTM", union(context_detector(), bilstm_only)),
-                           ("FINAL: retrained BiLSTM + context", union(bilstm_v2_only, context_detector()))):
+                           ("retrained BiLSTM + context (no veto)", union(bilstm_v2_only, context_detector())),
+                           ("SHIPPED: retrained BiLSTM + context + veto", shipped_detector)):
             for name, subset in (("dev", dev), ("TEST", test)):
                 print(fmt(f"{label} [{name}]", evaluate(subset, det)))
         return 0

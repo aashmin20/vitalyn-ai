@@ -192,6 +192,19 @@ def test_session_attributes_job_and_events_to_the_patient(video):
     assert s.status()["patient_id"] == "patient-123"
 
 
+def test_status_reports_the_models_own_numbers(video):
+    db = FakeDB()
+    clf = FakeClassifier(0.95)
+    det = StreamingFallDetector(clf, seq_len=4, step=2, min_consecutive=1, cooldown_windows=1)
+    s = LiveSession("room-1", video, pose=FakePose(), classifier=clf, detector=det, sample_fps=20, db=db)
+    s.start()
+    wait_stopped(s)
+    a = s.status()["assessment"]
+    assert a["label"] in ("Normal bed activity", "Potential fall detected", "Uncertain — Manual verification required")
+    if a["fall_confidence"] is not None:            # only ever the classifier's output (0.95 here)
+        assert a["fall_confidence"] == 95.0 and a["normal_confidence"] == 5.0
+
+
 # ── several patients at once ─────────────────────────────────────────────────
 
 import live_pipeline

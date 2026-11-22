@@ -128,3 +128,27 @@ def test_rule_detector_modes():
     assert RuleFallDetector("nonsense").mode == "context"
     off = RuleFallDetector("off")
     assert all(off.update(f) is None for f in frames)
+
+
+
+def test_a_confident_normal_model_prediction_holds_a_rule_alert_back():
+    frames = [person(BED_Y)] * 40 + [person(FLOOR_Y)] * 40
+    vetoing = RuleFallDetector("context", veto_below=0.10)
+    assert all(vetoing.update(f, model_probability=0.05) is None for f in frames)
+    assert vetoing.vetoed == 1
+    # no valid model prediction (warming up / not in view): the rule still alerts
+    open_rule = RuleFallDetector("context", veto_below=0.10)
+    assert sum(open_rule.update(f, model_probability=None) is not None for f in frames) == 1
+    # an unsure model does not hold it back
+    unsure = RuleFallDetector("context", veto_below=0.10)
+    assert sum(unsure.update(f, model_probability=0.4) is not None for f in frames) == 1
+
+
+def test_body_low_flag_follows_the_body():
+    det = RuleFallDetector("context")
+    for f in [person(BED_Y)] * 40:
+        det.update(f)
+    assert det.body_low is False
+    for f in [person(FLOOR_Y)] * 10:
+        det.update(f)
+    assert det.body_low is True

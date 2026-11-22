@@ -11,6 +11,8 @@ Output: (batch, 1)            — sigmoid probability of fall
 """
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -66,7 +68,9 @@ class FallClassifier:
 
     def __init__(self, path: Optional[str] = None, threshold: Optional[float] = None):
         self._model: Optional[BiLSTMFallClassifier] = None
-        self._device = "mps" if torch.backends.mps.is_available() else "cpu"
+        # CPU by default: for one 30x34 window the GPU transfer costs more than the maths
+        # (measured 0.9 ms on CPU vs 3.4 ms on MPS on the development Mac). VITALYN_BILSTM_DEVICE overrides.
+        self._device = os.getenv("VITALYN_BILSTM_DEVICE", "cpu")
         self.path = path or BILSTM_MODEL_PATH
         self.threshold = FALL_THRESHOLD if threshold is None else threshold
 
@@ -95,7 +99,7 @@ class FallClassifier:
         # (1, seq_len, 34)
         x = torch.tensor(sequence, dtype=torch.float32).unsqueeze(0).to(self._device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             prob = model(x).item()
 
         return prob, prob >= self.threshold

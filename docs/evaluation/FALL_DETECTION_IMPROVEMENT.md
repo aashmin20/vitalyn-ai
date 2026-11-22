@@ -89,6 +89,33 @@ Overfitting evidence: training loss falls steadily while validation loss is nois
 after about epoch 5; validation F1 still rises to epoch 20, hence early stopping on F1. Validation has
 only 77 clips, so its numbers are uncertain.
 
+## Live status display, false-alert veto and speed
+
+**Status shown on Watch Live** (`ml-engine/live_status.py`): "Normal bed activity", "Potential fall
+detected" or "Uncertain — Manual verification required", with **Normal activity confidence** and
+**Potential fall confidence**. Both percentages are the retrained BiLSTM's sigmoid output (fall % =
+P(fall) averaged over the last two windows, normal % = 100 − fall %). When the model has no valid
+prediction (first 5 seconds, or under 80% frames with a person) no percentage is shown and the status is
+Uncertain. Bands chosen on the 77 validation clips: fall probability < 0.35 = Normal (84% of normal
+windows, 24% of fall-clip windows); 0.35 to the 0.65 threshold = Uncertain; an alert in the last 10 s =
+Potential fall, with the detector that raised it. If the movement rule sees the body below its resting
+level without a confirmed fall, the status is Uncertain.
+
+**False-alert veto:** a rule alert is held back when the BiLSTM has a valid prediction with fall
+probability < 0.10 (`VITALYN_FALL_RULE_VETO`). Chosen on validation (false alerts/h 48 → 20, recall
+unchanged, F1 0.72 → 0.81), then confirmed once on test:
+
+| Test (209 clips) | Precision | Recall | F1 | Non-fall clips alerted | False alerts / hour | IKAR standing falls |
+|---|---|---|---|---|---|---|
+| Retrained BiLSTM + rule, no veto | 0.660 | 0.753 | 0.703 | 26.6% | 55.4 | 211/278 |
+| **Shipped: + veto 0.10** | **0.759** | 0.741 | **0.750** | **16.1%** | **33.3** | 209/278 |
+
+**Speed:** the BiLSTM now runs on CPU with `torch.inference_mode()`: 0.77 ms per window against 3.4 ms on
+the Mac GPU (identical outputs, max difference 2.5e-14). YOLOv8n-pose stays on the GPU at about 11 ms per
+frame; its input size was not reduced, because that could change keypoint accuracy without a way to check it.
+
+The batch pipeline for uploaded videos does not apply the veto (its BiLSTM runs after the frame loop).
+
 ## Limitations (read before any claim)
 * Not clinically validated. Every alert remains a potential event for staff review.
 * The ORIGINAL BiLSTM's training record is unknown and it contributes no alerts on this data; the retrained model replaces it by default.

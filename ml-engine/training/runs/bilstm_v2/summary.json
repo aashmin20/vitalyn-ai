@@ -31,6 +31,6 @@
   "train_windows": 5171,
   "positive_weight": 1.965,
   "parameters": 154689,
-  "seconds": 59.1,
+  "seconds": 57.0,
   "weights": "vitalyn_fall_bilstm_v2.pt"
 }

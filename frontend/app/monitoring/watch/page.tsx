@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { usePoll } from "@/lib/hooks/usePoll";
+import { FallAssessment } from "@/components/monitoring/FallAssessment";
 import { useEventSource } from "@/lib/hooks/useEventSource";
 import {
   getLiveSources,
@@ -391,6 +392,8 @@ function WatchLive() {
               </div>
             </CardContent>
           </Card>
+
+          {watching && <FallAssessment assessment={mySession?.assessment} retrained={mySession?.retrained_model} />}
 
           {watching && (
             <div className="flex justify-end">

@@ -116,6 +116,7 @@ class ContextualFallDetector:
         self._in_bed: Deque[Optional[float]] = deque(maxlen=c.window)
         self._cooldown = 0
         self._latched = False                                  # one alert per descent
+        self.body_low = False                                  # body well below its resting level right now
 
     # ---- helpers ----------------------------------------------------------------------
     def _evaluate(self, y: np.ndarray, L: float):
@@ -186,6 +187,7 @@ class ContextualFallDetector:
                 any_low = True
             elif isinstance(res, tuple) and (best is None or res[0] > best[0]):
                 best = res
+        self.body_low = any_low or best is not None
         if not any_low and best is None:
             self._latched = False            # nobody is low any more: the next descent may alert again
         if best is None or self._latched:
@@ -239,19 +241,34 @@ class RuleFallDetector:
     "off" disables the rule-based check (the BiLSTM alone decides).
     """
 
-    def __init__(self, mode: str = "context", cfg: Optional[ContextConfig] = None):
+    def __init__(self, mode: str = "context", cfg: Optional[ContextConfig] = None, veto_below: float = 0.0):
         from fall_heuristic import PostureTransitionDetector, person_box
         self.mode = mode if mode in ("context", "legacy", "off") else "context"
+        # A rule alert is held back when the BiLSTM sees the person clearly and its fall probability is
+        # below this (0.10 chosen on validation: false alerts/h 48 -> 20, recall unchanged).
+        self.veto_below = veto_below
+        self.vetoed = 0
         self._context = ContextualFallDetector(cfg)
         self._legacy = PostureTransitionDetector()
         self._box = person_box
 
-    def update(self, kpts: Optional[np.ndarray]) -> Optional[Tuple[float, str]]:
+    @property
+    def body_low(self) -> bool:
+        return self.mode == "context" and self._context.body_low
+
+    def update(self, kpts: Optional[np.ndarray], model_probability: Optional[float] = None) -> Optional[Tuple[float, str]]:
+        """`model_probability`: the BiLSTM's latest window probability, or None if it has none (warming
+        up / person not in view). Only a valid, confidently-normal prediction can hold an alert back."""
         if self.mode == "off":
             return None
         if self.mode == "legacy":
             ar, h = self._box(kpts, KPT_CONF_MIN)
             fired, conf = self._legacy.update(ar, h)
-            return (conf, "heuristic") if fired else None
-        sig = self._context.update(kpts)
-        return (calibrated(sig.score), "context") if sig is not None else None
+            result = (conf, "heuristic") if fired else None
+        else:
+            sig = self._context.update(kpts)
+            result = (calibrated(sig.score), "context") if sig is not None else None
+        if result is not None and model_probability is not None and model_probability < self.veto_below:
+            self.vetoed += 1
+            return None
+        return result

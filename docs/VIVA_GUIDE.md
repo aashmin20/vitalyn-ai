@@ -14,8 +14,9 @@ retrained here, whose settings are all recorded.
 > Patients in hospital beds can fall, and nurses cannot watch every bed all the time. VITALYN is a hospital
 > management system whose core is a camera-based fall monitor. A pretrained pose network (YOLOv8n-pose)
 > turns each video frame into 17 body keypoints. A BiLSTM that I trained, plus a context-aware rule, look at
-> how those keypoints move over time and raise a **potential** fall for a nurse to check. On held-out clips
-> F1 went from 0.18 (earlier version) to 0.70. It is a research prototype and not clinically validated.
+> how those keypoints move over time and raise a **potential** fall for a nurse to check. Staff see a live
+> status (normal / uncertain / potential fall) with the model's own confidence. On held-out clips F1 went
+> from 0.18 (earlier version) to 0.75. It is a research prototype and not clinically validated.
 
 ---
 
@@ -44,7 +45,7 @@ retrained here, whose settings are all recorded.
 no record kept) raised **no alerts** on the evaluation clips. I found this with a proper evaluation, then
 **retrained the BiLSTM myself** with a recorded split, augmentation, class weighting and early stopping.
 The retrained model alone reaches F1 0.676 on the held-out test (precision 0.817). Combined with the
-context rule it reaches F1 0.703. Remaining honest weakness: the BiLSTM does not detect standing falls
+context rule and the false-alert veto it reaches F1 0.750 (33 false alerts/h). Remaining honest weakness: the BiLSTM does not detect standing falls
 (IKAR); the rule covers those. Questions 18-20 in section 13 prepare you for this.
 
 ---
@@ -270,7 +271,8 @@ All from `cd ml-engine && python3 fall_eval.py report` and `python3 fall_eval.py
 | **Retrained BiLSTM alone** | **0.817** | 0.577 | 0.676 | **8.9%** | **17.4** |
 | Context rule alone | 0.692 | 0.635 | 0.663 | 19.4% | 38.0 |
 | Context rule + old posture rule | 0.567 | 0.694 | 0.624 | 36.3% | 71.3 |
-| **Final default: retrained BiLSTM + context rule** | 0.660 | **0.753** | **0.703** | 26.6% | 55.4 |
+| Retrained BiLSTM + context rule (no veto) | 0.660 | 0.753 | 0.703 | 26.6% | 55.4 |
+| **Shipped: BiLSTM + rule + veto 0.10** | **0.759** | 0.741 | **0.750** | **16.1%** | **33.3** |
 
 **Why this default:** on the 77 validation clips the BiLSTM alone had the best F1 (0.760 vs 0.719) and
 far fewer false alerts, but it caught **0 of 278** IKAR standing falls, while the context rule caught 211.
@@ -289,13 +291,26 @@ BiLSTM-only mode with fewer false alarms.
 | Real fall | TP 49 | FN 36 |
 | No fall | FP 11 | TN 113 |
 
-| Final default (BiLSTM + rule) | Predicted fall | Predicted no fall |
+| Shipped (BiLSTM + rule + veto) | Predicted fall | Predicted no fall |
 |---|---|---|
-| Real fall | TP 64 | FN 21 |
-| No fall | FP 33 | TN 91 |
+| Real fall | TP 63 | FN 22 |
+| No fall | FP 20 | TN 104 |
 
-**Standing falls (IKAR, falls only, recall):** baseline 192/278 (69.1%), retrained BiLSTM 0/278, final
-**211/278 (75.9%)**, all from the context rule. IKAR clips are short (median 23 samples, below the
+**Veto (false-alert reduction):** a rule alert is held back when the BiLSTM sees the person clearly and its
+fall probability is below 0.10. Chosen on validation (false alerts/h 48 → 20), confirmed on test
+(55.4 → 33.3 per hour, F1 0.703 → 0.750, one extra missed fall).
+
+**Live status on Watch Live:** "Normal bed activity" (fall probability < 0.35), "Uncertain — Manual
+verification required" (0.35-0.65, person not in view, warming up, or body below its resting level),
+"Potential fall detected" (alert in the last 10 s, naming the detector). Normal % and fall % are the
+BiLSTM's sigmoid output averaged over the last two windows; nothing is shown when there is no valid
+prediction. Code: `ml-engine/live_status.py`.
+
+**Speed:** BiLSTM on CPU 0.77 ms per window (3.4 ms on the Mac GPU, same outputs); pose model ~11 ms per
+frame on the GPU.
+
+**Standing falls (IKAR, falls only, recall):** baseline 192/278 (69.1%), retrained BiLSTM 0/278, shipped
+**209/278 (75.2%)**, all from the context rule. IKAR clips are short (median 23 samples, below the
 30-sample window) and the BiLSTM was trained only on bed scenes. IKAR was used to choose the rule's
 anchor, so this is not a held-out estimate.
 
@@ -439,6 +454,13 @@ say what failed.
     so the default adds the rule; the BiLSTM-only mode is one setting away.
 20b. **How did you choose the threshold 0.65?** By scanning 0.20-0.90 on the validation clips with the live
     decision rule and taking the best F1. Not on test.
+20d. **Where do the percentages on screen come from?** The BiLSTM's sigmoid output, averaged over the last
+    two windows; normal = 100 − fall. Not calibrated clinical probabilities; nothing is shown when the
+    model has no valid window.
+20e. **How did you reduce false alerts?** A rule alert is held back when the BiLSTM clearly sees the
+    person and gives under 10% fall probability. Chosen on validation; test false alerts/h 55 → 33.
+20f. **How did you make it faster?** Measured each step: the tiny BiLSTM was slower on the GPU because of
+    data transfer, so it runs on CPU (3.4 → 0.77 ms). The pose CNN stays on the GPU (~11 ms).
 20c. **Does it overfit?** Training loss keeps falling but validation loss stops improving after about epoch
     5; validation F1 peaks at epoch 20, so early stopping keeps that model. Validation F1 0.76 vs test 0.68.
 21. **What is calibration and why?** Making the confidence match how often alerts are right. Brier score
