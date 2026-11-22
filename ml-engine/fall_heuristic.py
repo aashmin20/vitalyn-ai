@@ -1,9 +1,8 @@
 """
 fall_heuristic.py — Rule-based temporal fall detection.
 
-Used as a secondary signal alongside the BiLSTM.
-Detects falls by tracking aspect ratio (width/height) of the person bounding box
-over time — a falling person becomes horizontal (w/h > threshold).
+Used as a secondary signal alongside the BiLSTM: PostureTransitionDetector flags a person
+who goes from upright to horizontal quickly with a collapse in body height.
 
 This is explicitly labelled as a heuristic, not a trained classifier.
 Both this and the BiLSTM output are reported transparently in the pipeline.
@@ -11,60 +10,8 @@ Both this and the BiLSTM output are reported transparently in the pipeline.
 from __future__ import annotations
 
 from collections import deque
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 import numpy as np
-
-# A person is considered 'potentially falling' when their bbox aspect ratio
-# (width/height) exceeds this threshold. Normal standing: ~0.3-0.5. Fallen: >1.2
-FALL_AR_THRESHOLD = 1.1
-FALL_MIN_FRAMES   = 4    # consecutive frames above threshold to trigger
-COOLDOWN_FRAMES   = 20   # frames to skip after event fires
-
-
-class AspectRatioFallDetector:
-    """
-    Tracks person bounding box aspect ratios across frames.
-    Call update(aspect_ratio) per sampled frame (None if no person).
-    """
-
-    def __init__(self):
-        self._window: deque = deque(maxlen=FALL_MIN_FRAMES)
-        self._cooldown = 0
-        self._frame = 0
-
-    def update(self, aspect_ratio: Optional[float]) -> Tuple[bool, float]:
-        """
-        Returns (is_fall_trigger, confidence).
-        confidence is estimated from how far above threshold the AR is.
-        """
-        self._frame += 1
-
-        if self._cooldown > 0:
-            self._cooldown -= 1
-            return False, 0.0
-
-        if aspect_ratio is None:
-            self._window.clear()
-            return False, 0.0
-
-        self._window.append(aspect_ratio)
-
-        if len(self._window) < FALL_MIN_FRAMES:
-            return False, 0.0
-
-        # All frames in window must exceed threshold
-        if all(ar >= FALL_AR_THRESHOLD for ar in self._window):
-            mean_ar = float(np.mean(list(self._window)))
-            # Confidence scales with how horizontal the person is
-            # max plausible AR ≈ 3.0, threshold = 1.1
-            conf = min(0.90, (mean_ar - FALL_AR_THRESHOLD) / (3.0 - FALL_AR_THRESHOLD))
-            conf = max(0.40, conf)
-            self._cooldown = COOLDOWN_FRAMES
-            self._window.clear()
-            return True, round(conf, 4)
-
-        return False, 0.0
-
 
 # ---------------------------------------------------------------------------
 # Posture-transition detector (used by the live and batch pipelines)

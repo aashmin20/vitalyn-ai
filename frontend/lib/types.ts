@@ -151,21 +151,6 @@ export interface LiveStatus {
 export interface LiveSources {
   cameras: { index: number; label: string }[];
   urls_enabled: boolean;
-  phone_link_enabled?: boolean;
-}
-
-export interface PhoneLink {
-  token: string;
-  url: string;
-  expires_in: number;
-}
-
-export interface PhoneLinkStatus {
-  exists: boolean;
-  connected: boolean;
-  frames?: number;
-  last_frame_age_s?: number | null;
-  expires_in?: number | null;
 }
 
 export interface Doctor {

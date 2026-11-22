@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   Archive,
   ChevronDown,
-  Activity,
   ShieldCheck,
   ScrollText,
   CalendarDays,
@@ -45,15 +44,10 @@ const NAV: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    label: "Monitoring",
+    label: "Watch Live",
+    href: "/monitoring/watch",
     roles: CLINICAL_ROLES,
-    icon: Monitor,
-    children: [
-      { label: "Overview", href: "/monitoring", icon: Activity },
-      { label: "Watch Live", href: "/monitoring/watch", icon: Video },
-      { label: "Video Review", href: "/monitoring/live", icon: Video },
-      { label: "Video Analysis", href: "/monitoring/analysis", icon: Upload },
-    ],
+    icon: Video,
   },
   {
     label: "Patients",
@@ -77,9 +71,7 @@ const NAV: NavItem[] = [
     icon: Building2,
     children: [
       { label: "Ward board", href: "/ward", icon: BedDouble },
-      { label: "Rooms", href: "/operations/rooms", icon: Building2 },
-      { label: "Beds", href: "/operations/beds", icon: BedDouble },
-      { label: "Occupancy", href: "/operations/occupancy", icon: BedDouble },
+      { label: "Rooms and beds", href: "/operations/rooms", icon: Building2 },
     ],
   },
   {
@@ -90,15 +82,7 @@ const NAV: NavItem[] = [
       { label: "Active", href: "/alerts/active", icon: AlertTriangle },
       { label: "Acknowledged", href: "/alerts/acknowledged", icon: CheckCircle2 },
       { label: "Resolved", href: "/alerts/resolved", icon: Archive },
-    ],
-  },
-  {
-    label: "Analytics",
-    roles: CLINICAL_ROLES,
-    icon: BarChart2,
-    children: [
-      { label: "Occupancy Trends", href: "/analytics/occupancy", icon: TrendingUp },
-      { label: "Fall Events", href: "/analytics/events", icon: BarChart2 },
+      { label: "Fall statistics", href: "/analytics/events", icon: BarChart2 },
     ],
   },
   {
@@ -108,6 +92,17 @@ const NAV: NavItem[] = [
     children: [
       { label: "Staff", href: "/admin/staff", icon: ShieldCheck },
       { label: "Audit log", href: "/admin/audit", icon: ScrollText },
+    ],
+  },
+  // The original upload-a-video research flow. Kept, but out of the main hospital workflow.
+  {
+    label: "Research tools",
+    roles: ["admin", "doctor"],
+    icon: Monitor,
+    children: [
+      { label: "Video analysis", href: "/monitoring/analysis", icon: Upload },
+      { label: "Video review", href: "/monitoring/live", icon: Video },
+      { label: "Occupancy trends", href: "/analytics/occupancy", icon: TrendingUp },
     ],
   },
 ];

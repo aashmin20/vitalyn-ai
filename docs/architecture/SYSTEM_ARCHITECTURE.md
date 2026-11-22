@@ -113,4 +113,4 @@ Camera/stream → capture thread (latest frame, overlay, JPEG) → `/live/stream
                          ↓
             `db_writer` → FallEvent + Alert / OccupancyRecord → `/live/events` (SSE) and the existing dashboard/alerts pages
 
-Implemented in `ml-engine/live_pipeline.py`, `ml-engine/streaming_detector.py`, `backend/live_routes.py` and the `/monitoring/camera` page.
+Implemented in `ml-engine/live_pipeline.py`, `ml-engine/streaming_detector.py`, `backend/live_routes.py` and the Watch Live page (`/monitoring/watch`).

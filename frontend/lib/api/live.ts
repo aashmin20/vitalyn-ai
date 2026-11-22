@@ -1,5 +1,5 @@
 import { apiFetch, apiUrl } from "./client";
-import type { LiveSources, LiveStatus, PhoneLink, PhoneLinkStatus } from "../types";
+import type { LiveSources, LiveStatus } from "../types";
 
 export const startLive = (roomId: string, source: string, patientId?: string) =>
   apiFetch<LiveStatus>("/api/v1/live/start", {
@@ -22,11 +22,3 @@ export const liveEventsUrl = () => apiUrl("/api/v1/live/events");
 
 export const getLiveSources = () => apiFetch<LiveSources>("/api/v1/live/sources");
 
-export const createPhoneLink = () =>
-  apiFetch<PhoneLink>("/api/v1/live/phone-link", { method: "POST" });
-
-export const getPhoneLink = (token: string) =>
-  apiFetch<PhoneLinkStatus>(`/api/v1/live/phone-link/${encodeURIComponent(token)}`);
-
-export const deletePhoneLink = (token: string) =>
-  apiFetch<{ deleted: boolean }>(`/api/v1/live/phone-link/${encodeURIComponent(token)}`, { method: "DELETE" });

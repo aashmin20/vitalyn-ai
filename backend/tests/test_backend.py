@@ -770,53 +770,6 @@ def _jpeg_bytes():
     return buf.tobytes()
 
 
-def test_gateway_page_requires_valid_token(phone_registry):
-    from phone_gateway import gateway_app
-    c = TestClient(gateway_app)
-    assert c.get("/p/unknown-token").status_code == 404
-    token = phone_registry.create().token
-    page = c.get(f"/p/{token}")
-    assert page.status_code == 200 and token in page.text and "getUserMedia" in page.text
-
-
-def test_gateway_websocket_streams_frames_into_source(phone_registry):
-    from phone_gateway import gateway_app
-    src = phone_registry.create()
-    c = TestClient(gateway_app)
-    with c.websocket_connect(f"/p/{src.token}/ws") as ws:
-        ws.send_bytes(_jpeg_bytes())
-        ws.send_bytes(_jpeg_bytes())
-        ws.send_bytes(b"garbage")                 # ignored, does not break the stream
-        assert src.connected
-    assert src.frames_received == 2 and src.connected is False
-
-
-def test_gateway_websocket_rejects_unknown_token_and_second_phone(phone_registry):
-    from starlette.websockets import WebSocketDisconnect
-    from phone_gateway import gateway_app
-    c = TestClient(gateway_app)
-    with c.websocket_connect("/p/nope/ws") as ws:           # accepted, then closed with a reason the page can show
-        with pytest.raises(WebSocketDisconnect) as e:
-            ws.receive_text()
-    assert e.value.code == 4404
-    src = phone_registry.create()
-    with c.websocket_connect(f"/p/{src.token}/ws"):
-        with c.websocket_connect(f"/p/{src.token}/ws") as second:
-            with pytest.raises(WebSocketDisconnect) as e2:
-                second.receive_text()
-        assert e2.value.code == 4409
-
-
-def test_gateway_tells_phone_when_session_ended(phone_registry):
-    from phone_gateway import gateway_app
-    src = phone_registry.create()
-    c = TestClient(gateway_app)
-    with c.websocket_connect(f"/p/{src.token}/ws") as ws:
-        src.close()
-        ws.send_bytes(_jpeg_bytes())
-        assert ws.receive_text() == "ended"
-
-
 def test_ensure_cert_creates_and_reuses(tmp_path):
     from phone_gateway import ensure_cert
     cert, key = ensure_cert("192.168.1.50", str(tmp_path))
@@ -826,27 +779,6 @@ def test_ensure_cert_creates_and_reuses(tmp_path):
     assert open(cert, "rb").read() == first                       # reused
     ensure_cert("192.168.1.77", str(tmp_path))                    # new LAN address -> regenerated
     assert open(cert, "rb").read() != first
-
-
-def test_phone_link_api_disabled_by_default(client, monkeypatch):
-    monkeypatch.delenv("VITALYN_PHONE_GATEWAY", raising=False)
-    r = client.post("/api/v1/live/phone-link")
-    assert r.status_code == 422 and "VITALYN_PHONE_GATEWAY=1" in r.json()["detail"]
-    assert client.get("/api/v1/live/sources").json()["phone_link_enabled"] is False
-
-
-def test_phone_link_api_create_status_delete(client, monkeypatch, phone_registry):
-    import types
-    import phone_gateway
-    monkeypatch.setenv("VITALYN_PHONE_GATEWAY", "1")
-    fake_gw = types.SimpleNamespace(running=True, base_url=lambda: "https://192.168.1.6:8443")
-    monkeypatch.setattr(phone_gateway, "get_gateway", lambda: fake_gw)
-    link = client.post("/api/v1/live/phone-link").json()
-    assert link["url"] == f"https://192.168.1.6:8443/p/{link['token']}" and link["expires_in"] > 0
-    st = client.get(f"/api/v1/live/phone-link/{link['token']}").json()
-    assert st == {**st, "exists": True, "connected": False, "frames": 0}
-    assert client.delete(f"/api/v1/live/phone-link/{link['token']}").json() == {"deleted": True}
-    assert client.get(f"/api/v1/live/phone-link/{link['token']}").json()["exists"] is False
 
 
 def test_validate_source_accepts_only_live_phone_links(phone_registry):

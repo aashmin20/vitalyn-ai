@@ -135,62 +135,6 @@ def ensure_cert(host_ip: str, cert_dir: str = CERT_DIR):
 
 # ── the phone-facing app ─────────────────────────────────────────────────────
 
-PAGE = """<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VITALYN phone camera</title>
-<style>
-body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#0f172a;color:#e2e8f0;
-display:flex;flex-direction:column;align-items:center;gap:14px;padding:20px;min-height:100vh;box-sizing:border-box}
-h1{font-size:18px;margin:8px 0 0}p{font-size:13px;color:#94a3b8;text-align:center;max-width:340px;margin:0}
-video{width:100%;max-width:420px;border-radius:12px;background:#000}
-button{font-size:16px;font-weight:600;padding:14px 22px;border:0;border-radius:10px;background:#10b981;color:#fff;width:100%;max-width:420px}
-#status{font-size:14px;font-weight:600}.live{color:#34d399}.bad{color:#f87171}
-</style></head><body>
-<h1>VITALYN phone camera</h1>
-<p><b>__LABEL__</b></p>
-<p>Video goes only to your Mac over this Wi-Fi. Nothing is stored on the phone or the Mac.</p>
-<video id="v" playsinline muted autoplay></video>
-<div id="status">Ready</div>
-<button id="go">Start streaming</button>
-<p>Point the back camera at the room, prop the phone steady and keep this page open and the screen on.</p>
-<script>
-const v = document.getElementById("v"), st = document.getElementById("status"), go = document.getElementById("go");
-const canvas = document.createElement("canvas");
-let ws, stream, timer, wake;
-function say(t, cls){ st.textContent = t; st.className = cls || ""; }
-async function start(){
-  go.disabled = true; say("Opening camera...");
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
-  } catch(e){ say("Camera blocked: " + e.name + ". Allow camera access and reload.", "bad"); go.disabled = false; return; }
-  v.srcObject = stream; await v.play().catch(()=>{});
-  try { wake = await navigator.wakeLock.request("screen"); } catch(e){}
-  ws = new WebSocket("wss://" + location.host + "__WS_PATH__");
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => { say("Streaming to VITALYN - keep this page open", "live"); go.style.display = "none"; loop(); };
-  ws.onclose = (e) => { clearTimeout(timer); say(e.code === 4404 ? "This QR code is no longer valid - ask staff for a new one" : (e.code === 4409 ? (e.reason || "Camera is busy") : "Stream ended"), "bad"); stopCam(); };
-  ws.onerror = () => say("Connection problem", "bad");
-  ws.onmessage = (m) => { if (m.data === "ended") { say("Session ended on the Mac", "bad"); } };
-}
-function stopCam(){ if(stream) stream.getTracks().forEach(t=>t.stop()); }
-function loop(){
-  if (!ws || ws.readyState !== 1) return;
-  if (v.videoWidth && ws.bufferedAmount < 400000) {
-    const w = Math.min(640, v.videoWidth), h = Math.round(v.videoHeight * w / v.videoWidth);
-    canvas.width = w; canvas.height = h;
-    canvas.getContext("2d").drawImage(v, 0, 0, w, h);
-    canvas.toBlob(b => { if (b && ws.readyState === 1) b.arrayBuffer().then(buf => ws.send(buf)); }, "image/jpeg", 0.6);
-  }
-  timer = setTimeout(loop, 100);
-}
-go.onclick = start;
-</script></body></html>"""
-
-
-
-# Patient pages use a "standby" protocol: the page stays connected with the camera OFF and
-# starts the camera when VITALYN tells it to (or when the user taps Start).
 PAGE_PATIENT = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -265,12 +209,7 @@ connect();
 gateway_app = FastAPI(title="VITALYN phone gateway", docs_url=None, redoc_url=None, openapi_url=None)
 
 
-PAGE_ADHOC_LABEL = "Phone camera"
 DISCONNECT_GRACE_S = 60       # how long a patient's session waits for a dropped phone before stopping
-
-
-def _render(label: str, ws_path: str) -> str:
-    return PAGE.replace("__LABEL__", html.escape(label)).replace("__WS_PATH__", ws_path)
 
 
 async def _reject(ws: WebSocket, code: int, reason: str) -> None:
@@ -279,57 +218,9 @@ async def _reject(ws: WebSocket, code: int, reason: str) -> None:
     await ws.close(code=code, reason=reason[:120])
 
 
-async def _pump(ws: WebSocket, source) -> None:
-    """Feed incoming JPEG frames to the source until the phone leaves or the session ends."""
-    while True:
-        msg = await ws.receive()
-        if msg["type"] == "websocket.disconnect":
-            break
-        data = msg.get("bytes")
-        if data:
-            source.push_jpeg(data)
-        if not source.isOpened():          # the live session ended
-            await ws.send_text("ended")
-            await ws.close()
-            break
-
-
 def _who(client, user_agent: str) -> str:
     host = client.host if client else "?"
     return f"{host} ({(user_agent or 'unknown browser')[:70]})"
-
-
-@gateway_app.get("/p/{token}", response_class=HTMLResponse)
-def phone_page(token: str, request: Request):
-    known = get_registry().get(token) is not None
-    print(f"[phone gateway] page {'opened' if known else 'REQUESTED WITH EXPIRED/UNKNOWN LINK'} by "
-          f"{_who(request.client, request.headers.get('user-agent', ''))}", flush=True)
-    if not known:
-        return HTMLResponse(
-            "<body style='font-family:sans-serif;padding:24px'><h3>Link expired</h3>"
-            "<p>Create a new phone link on the VITALYN Live Camera page.</p></body>",
-            status_code=404,
-        )
-    return HTMLResponse(_render(PAGE_ADHOC_LABEL, f"/p/{token}/ws"), headers={"Cache-Control": "no-store"})
-
-
-@gateway_app.websocket("/p/{token}/ws")
-async def phone_ws(ws: WebSocket, token: str):
-    source = get_registry().get(token)
-    if source is None:
-        await _reject(ws, 4404, "Link expired")
-        return
-    if source.connected:
-        await _reject(ws, 4409, "Another phone is already connected to this link")
-        return
-    await ws.accept()
-    source.set_connected(True)
-    print(f"[phone gateway] phone connected from {_who(ws.client, ws.headers.get('user-agent', ''))}", flush=True)
-    try:
-        await _pump(ws, source)
-    finally:
-        source.set_connected(False)
-        print(f"[phone gateway] phone disconnected ({source.frames_received} frames received)", flush=True)
 
 
 # ── patient camera QR: /c/{token} ────────────────────────────────────────────

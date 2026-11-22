@@ -216,51 +216,7 @@ def live_sources():
     return {
         "cameras": [{"index": i, "label": n} for i, n in enumerate(names)],
         "urls_enabled": urls_enabled(),
-        "phone_link_enabled": phone_gateway_enabled(),
     }
-
-
-@router.post("/phone-link")
-def create_phone_link():
-    """Create a one-session link the phone opens to stream its camera to this Mac."""
-    if not phone_gateway_enabled():
-        raise HTTPException(
-            status_code=422,
-            detail="Phone links are off. Restart the backend with VITALYN_PHONE_GATEWAY=1 to enable them.",
-        )
-    from phone_gateway import get_gateway
-    gateway = get_gateway()
-    if not gateway.running:
-        raise HTTPException(status_code=503, detail="Phone gateway is not running. Check the backend log.")
-    registry = _phone_registry()
-    source = registry.create()
-    return {
-        "token": source.token,
-        "url": f"{gateway.base_url()}/p/{source.token}",
-        "expires_in": registry.expires_in(source.token),
-    }
-
-
-@router.get("/phone-link/{token}")
-def phone_link_status(token: str):
-    registry = _phone_registry()
-    source = registry.get(token)
-    if source is None:
-        return {"exists": False, "connected": False}
-    age = source.age_s()
-    return {
-        "exists": True,
-        "connected": source.connected,
-        "frames": source.frames_received,
-        "last_frame_age_s": None if age is None else round(age, 1),
-        "expires_in": registry.expires_in(token),
-    }
-
-
-@router.delete("/phone-link/{token}")
-def delete_phone_link(token: str):
-    _phone_registry().remove(token)
-    return {"deleted": True}
 
 
 @router.get("/snapshot")
