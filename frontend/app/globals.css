@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Landing palette: bone and ink, one green accent, red only for fall alerts. */
+  --bone: #f3efe6;
+  --paper: #fbf9f4;
+  --ink: #1b1a17;
+  --ink-muted: #6b675e;
+  --line: #d8d1c3;
+  --vital: #2e5b4f;
+  --alert: #b4372b;
+  --background: #f3efe6;
+  --foreground: #1b1a17;
+  --sidebar-width: 240px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App page titles use the landing display face. */
+main h1 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 450 !important;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: #dce7e1;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8d1c3;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9a9385;
+}
+
+/* Timeline scrubber */
+input[type="range"].scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1b1a17;
+  cursor: pointer;
+  margin-top: -4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+input[type="range"].scrubber::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #d8d1c3;
+}
+
+/* Printable patient QR card: only the card is printed. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

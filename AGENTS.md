@@ -1,8 +1,9 @@
 # VITALYN — AI Agent Instructions
 
 ## Project Identity
-VITALYN is an AI-powered Hospital Bed Occupancy Monitoring
-and Patient Fall Alert System.
+VITALYN is a Hospital Management System (staff roles, admissions,
+transfers, discharge, outpatient appointments) with AI-powered
+bed-occupancy monitoring and patient fall alerts as its core feature.
 
 ## Core Principles
 - Build modular, maintainable and testable software.

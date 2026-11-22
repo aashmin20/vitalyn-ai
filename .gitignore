@@ -44,3 +44,22 @@ datasets/processed/
 # Secrets
 secrets/
 credentials.json
+# Local databases, uploaded videos and backups
+backend/*.db
+backend/*.db.bak*
+backend/uploads/
+
+# Self-signed phone-gateway certificate and private key
+backend/certs/
+
+# Local queue of fall events waiting for the database
+ml-engine/outbox.db
+.next-e2e/
+
+# Third-party datasets stay out of git (download per datasets/README.md); keep their readme/manifest
+datasets/doi-10/IKAR_dataset/
+datasets/doi-10/*.tar.gz
+
+# Build caches
+*.tsbuildinfo
+.next-check/
