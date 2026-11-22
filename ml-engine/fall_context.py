@@ -235,17 +235,20 @@ class RuleFallDetector:
     """The rule-based check the live and batch pipelines run beside the BiLSTM.
 
     update(pixel_keypoints) -> (confidence, source) on a new potential fall, else None.
-    mode "context" uses ContextualFallDetector; "legacy" uses the old posture-transition rule.
+    mode "context" uses ContextualFallDetector; "legacy" uses the old posture-transition rule;
+    "off" disables the rule-based check (the BiLSTM alone decides).
     """
 
     def __init__(self, mode: str = "context", cfg: Optional[ContextConfig] = None):
         from fall_heuristic import PostureTransitionDetector, person_box
-        self.mode = mode if mode in ("context", "legacy") else "context"
+        self.mode = mode if mode in ("context", "legacy", "off") else "context"
         self._context = ContextualFallDetector(cfg)
         self._legacy = PostureTransitionDetector()
         self._box = person_box
 
     def update(self, kpts: Optional[np.ndarray]) -> Optional[Tuple[float, str]]:
+        if self.mode == "off":
+            return None
         if self.mode == "legacy":
             ar, h = self._box(kpts, KPT_CONF_MIN)
             fired, conf = self._legacy.update(ar, h)

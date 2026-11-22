@@ -3,8 +3,9 @@
 Deep Learning, Semester V, project evaluation on **Monday 23 November 2026**:
 **8 minutes demo + 4 minutes viva, solo.**
 
-Every number in this guide comes from code in this repository that you can re-run. Where something is
-not known (marked **YOU MUST FILL IN**), do not guess in front of the panel.
+Every number in this guide comes from code in this repository that you can re-run (section 9). The only
+thing not on record is how the ORIGINAL BiLSTM checkpoint was trained; the model you present is the one
+retrained here, whose settings are all recorded.
 
 ---
 
@@ -12,10 +13,9 @@ not known (marked **YOU MUST FILL IN**), do not guess in front of the panel.
 
 > Patients in hospital beds can fall, and nurses cannot watch every bed all the time. VITALYN is a hospital
 > management system whose core is a camera-based fall monitor. A pretrained pose network (YOLOv8n-pose)
-> turns each video frame into 17 body keypoints. A deep sequence model (a BiLSTM) and a context-aware
-> rule then look at how those keypoints move over time and raise a **potential** fall for a nurse to check.
-> I measured it on held-out clips: F1 went from 0.18 to 0.66 against the earlier version. It is a research
-> prototype and not clinically validated.
+> turns each video frame into 17 body keypoints. A BiLSTM that I trained, plus a context-aware rule, look at
+> how those keypoints move over time and raise a **potential** fall for a nurse to check. On held-out clips
+> F1 went from 0.18 (earlier version) to 0.70. It is a research prototype and not clinically validated.
 
 ---
 
@@ -27,24 +27,25 @@ not known (marked **YOU MUST FILL IN**), do not guess in front of the panel.
 | Why deep learning | Met | Pose estimation from raw pixels needs a CNN; fall is a temporal pattern (sequence model) | Section 2 |
 | Dataset origin, size, labels, quality | Partly | FallVision CSVs (616 clips) and IKAR (278 videos) are real and counted in section 3 | **`docs/research/DATASET_RESEARCH.md` contains descriptions that do not match the real files (e.g. "~100 hours", "hospital recordings", "stereo depth"). Do not quote that file.** Use section 3 here |
 | Preprocessing, split, leakage prevention | Met for evaluation | Normalisation, 6 fps sampling, deterministic clip-level split (section 3) | Explain clip-level split = no frames of one video in both sets |
-| Augmentation | Not done | None used | Say so honestly |
+| Augmentation | Met | Mirror with left/right joints swapped, ±3% shift, ±8% scale (training only) | Section 5.2 |
 | Model layers, activations, loss | Met | BiLSTM layers read from the checkpoint (section 5) | Section 5 |
-| Optimizer, learning rate, batch size, epochs | **GAP** | Not recorded anywhere in the repo. The BiLSTM was trained in a separate notebook | **YOU MUST FILL IN from your training notebook.** If you cannot find it, say the training record was lost and offer the evaluation evidence instead |
+| Optimizer, learning rate, batch size, epochs | Met | `ml-engine/train_bilstm.py`, recorded run in `ml-engine/training/runs/bilstm_v2/` (section 5.2) | Learn the numbers in section 5.2 |
 | Mathematical understanding | Prepare | Section 6 | Practise explaining LSTM gates, BCE loss, backprop |
-| Implementation ownership, training/inference pipeline | Inference: met. Training: **GAP** | Inference code, evaluation harness and context detector are in the repo. Training code is not | Bring the training notebook if you have it |
+| Implementation ownership, training/inference pipeline | Met | Training (`train_bilstm.py`), inference (`bilstm_model.py`, `streaming_detector.py`), evaluation (`fall_eval.py`) are all in the repo | Be able to walk through `train_bilstm.py` (section 10) |
 | Metrics: precision, recall, F1, confusion matrix | Met | Section 7 (held-out test, confusion matrices) | Explain why recall matters and why accuracy would mislead |
 | Baseline / alternative | Met | Old live logic vs new; ablations (BiLSTM only, rule only, combined) | Section 7 |
 | Overfitting, validation, failure cases, generalization | Met (honestly) | Dev/test split, IKAR standing falls, failure list in section 8 | Section 8 |
-| Reproducibility: code, dependencies, weights, data, results | Mostly | `ml-engine/fall_eval.py`, `requirements.txt`, weights in `ml-engine/` | Weights and datasets are git-ignored: **keep a local copy and a USB copy**. No random seeds needed for evaluation (deterministic) |
+| Reproducibility: code, dependencies, weights, data, results | Met | Seed 42; re-running training gives bit-identical weights (checked). `fall_eval.py` is deterministic | Weights and datasets are git-ignored: **keep a local copy and a USB copy** |
 | Disclose pretrained models and AI tools | Do it | Section 14 | Put it on your last slide |
 | Demo: real inference, not UI tour | Plan | Section 11 demo script | Rehearse with a timer |
 | No dependence on internet for the only copy | **Risk** | App uses Supabase (cloud database) | Keep the evaluation script and a SQLite fallback ready (section 12) |
 
-**The single biggest risk for a Deep Learning panel:** the measured improvement comes from the
-context-aware rule, while the BiLSTM raised **no alerts** on the evaluation clips. Be ready to explain
-this honestly (section 8, Q&A 18-20). The guidelines warn that "wrapping a pretrained model" is not
-enough. Your own work is the temporal pipeline, the evaluation methodology, the detector design and the
-analysis. Present it that way.
+**The story for a Deep Learning panel:** the original BiLSTM checkpoint (trained in an earlier notebook,
+no record kept) raised **no alerts** on the evaluation clips. I found this with a proper evaluation, then
+**retrained the BiLSTM myself** with a recorded split, augmentation, class weighting and early stopping.
+The retrained model alone reaches F1 0.676 on the held-out test (precision 0.817). Combined with the
+context rule it reaches F1 0.703. Remaining honest weakness: the BiLSTM does not detect standing falls
+(IKAR); the rule covers those. Questions 18-20 in section 13 prepare you for this.
 
 ---
 
@@ -74,7 +75,7 @@ analysis. Present it that way.
 |---|---|---|
 | **FallVision (bed subset)** | 616 keypoint CSV files already extracted from videos: **243 fall clips** (`B_D_*`) and **373 non-fall clips** (`B_N_*`: lying, sleeping, sitting, changing position). Each row: frame, keypoint name, x, y, confidence for 17 COCO keypoints. Median ~90 frames per clip | Evaluation (dev/test split) |
 | **IKAR** (`datasets/doi-10`) | 278 short MP4 videos of simulated falls by 7 volunteers on mats: trips 92, slips 64, faintings 65, blackouts 57. Falls only. CC BY 4.0 | Standing-fall recall check |
-| BiLSTM training data | **YOU MUST FILL IN** (from your notebook: which dataset, how many sequences, which split) | Training |
+| BiLSTM training data | FallVision **dev** clips only: 330 train clips (129 falls) → 5,171 windows; 77 validation clips (29 falls). Test clips never used | Training (`train_bilstm.py`) |
 
 **Preprocessing (same as the BiLSTM was trained on, `ml-engine/pose_extractor.py`):**
 1. Sample the video at 6 frames per second.
@@ -93,7 +94,7 @@ All settings were chosen on dev; test was scored once at the end.
 * Some frames contain two people; I keep the more confident one.
 * Fall clips are named `B_D` and non-fall `B_N`; the recording conditions may differ between classes,
   which a model could exploit (possible bias).
-* No augmentation was used.
+* Training labels are weak: every window of a fall clip is labelled "fall", even the frames before the fall.
 
 ---
 
@@ -116,7 +117,7 @@ All settings were chosen on dev; test was scored once at the end.
        sliding window of 30                          │
        BiLSTM → P(fall) every 15 samples             ▼
        (guard: ≥80% frames with a person)     Context-aware rule:
-       2 windows in a row ≥ 0.45 → signal     descent below resting level + fast + settles low
+       2 windows in a row ≥ 0.65 → signal     descent below resting level + fast + settles low
                      │                                          │
                      └──────────────┬───────────────────────────┘
                                     ▼
@@ -145,8 +146,9 @@ seconds on it at most.
   in one pass ("you only look once").
 * Used as a **frozen feature extractor** (no fine-tuning). Settings: confidence 0.25 in the extractor.
 
-### 5.2 BiLSTM fall classifier (`ml-engine/bilstm_model.py`)
-Read directly from the saved checkpoint `ml-engine/vitalyn_fall_bilstm.pt` (**154,689 parameters**):
+### 5.2 BiLSTM fall classifier (`ml-engine/bilstm_model.py`, trained by `ml-engine/train_bilstm.py`)
+Weights `ml-engine/vitalyn_fall_bilstm_v2.pt` (**154,689 parameters**). Architecture (same as the original
+checkpoint, so the live pipeline loads either):
 
 | Layer | Shape | Notes |
 |---|---|---|
@@ -157,11 +159,30 @@ Read directly from the saved checkpoint `ml-engine/vitalyn_fall_bilstm.pt` (**15
 | Dense fc1 + ReLU | 128 → 32 | |
 | Dense fc2 + sigmoid | 32 → 1 | probability of "fall" |
 
-* **Decision:** `prob ≥ 0.45` (`ml-engine/config.py:38`; slightly below 0.5 to favour recall), and two
-  consecutive windows (window every 15 samples) before a signal.
-* **Loss:** the sigmoid output implies **binary cross-entropy**. **YOU MUST FILL IN** whether the notebook
-  used `BCELoss` or `BCEWithLogitsLoss`.
-* **Optimizer, learning rate, batch size, epochs, early stopping:** **YOU MUST FILL IN** from the notebook.
+**Training (recorded in `ml-engine/training/runs/bilstm_v2/summary.json`):**
+
+| Setting | Value | Why |
+|---|---|---|
+| Loss | Binary cross-entropy (`nn.BCELoss`), fall class weighted ×1.97 | Binary output with sigmoid; weighting balances 1,744 fall vs 3,427 non-fall windows |
+| Optimizer | Adam, learning rate 0.001, weight decay 0.0001 | Adam adapts the step size per weight; weight decay is L2 regularisation |
+| Batch size | 64 | Stable gradient estimates, fast on CPU |
+| Epochs | up to 40, **early stopping** on validation F1 (patience 8); best epoch **20**; stopped at 28 | Stops before overfitting |
+| Dropout | 0.3 between LSTM layers | Regularisation |
+| Gradient clipping | norm 1.0 | Prevents exploding gradients in the LSTM |
+| Augmentation | mirror (left/right joints swapped) p=0.5, shift ±3%, scale ±8% | More variety from a small dataset |
+| Seed | 42 (CPU) | Re-running gives identical weights |
+| Training time | about 1 minute on a MacBook CPU | |
+| Decision threshold | **0.65**, chosen on validation clips | Best validation F1 with the live rules |
+
+* **Decision rule (same as live):** window of 30 every 15 samples, at least 80% person frames, probability
+  ≥ 0.65 in **two consecutive windows**.
+* **Learning curves:** `ml-engine/training/runs/bilstm_v2/learning_curves.png`. Training loss falls steadily
+  from 0.88 to 0.39. Validation loss (77 clips, so noisy) stops improving after about epoch 5, which shows
+  some overfitting, while validation F1 keeps rising to 0.81 at epoch 20. That is why early stopping
+  watches F1. (Training loss is per window, validation loss per clip, so the two are not directly
+  comparable.)
+* **The original checkpoint** `vitalyn_fall_bilstm.pt` (trained earlier in a notebook whose settings were
+  not recorded) is kept for comparison only.
 
 **Why each design choice (defend these):**
 * *LSTM rather than a plain RNN:* gates avoid vanishing gradients over 30 steps.
@@ -239,14 +260,22 @@ b = 0.5724). Brier score = mean (p − y)², lower is better.
 
 ## 7. Experiments and results
 
-All from `cd ml-engine && python3 fall_eval.py report` (test = 209 held-out clips: 85 falls, 124 non-falls).
+All from `cd ml-engine && python3 fall_eval.py report` and `python3 fall_eval.py v2`
+(test = 209 held-out clips: 85 falls, 124 non-falls; none used for training or choosing settings).
 
 | Method | Precision | Recall | F1 | Non-fall clips alerted | False alerts / hour |
 |---|---|---|---|---|---|
-| Baseline: earlier live logic (BiLSTM + posture rule) | 0.289 | 0.129 | 0.179 | 21.8% | 42.8 |
-| **Final: BiLSTM + context-aware rule** | **0.692** | **0.635** | **0.663** | **19.4%** | **38.0** |
-| Alternative: context rule + old posture rule | 0.567 | 0.694 | 0.624 | 36.3% | 71.3 |
-| Ablation: BiLSTM alone | 0 alerts | 0.000 | 0.000 | 0% | 0 |
+| Baseline: original live logic (original BiLSTM + posture rule) | 0.289 | 0.129 | 0.179 | 21.8% | 42.8 |
+| Original BiLSTM alone | no alerts | 0.000 | 0.000 | 0% | 0 |
+| **Retrained BiLSTM alone** | **0.817** | 0.577 | 0.676 | **8.9%** | **17.4** |
+| Context rule alone | 0.692 | 0.635 | 0.663 | 19.4% | 38.0 |
+| Context rule + old posture rule | 0.567 | 0.694 | 0.624 | 36.3% | 71.3 |
+| **Final default: retrained BiLSTM + context rule** | 0.660 | **0.753** | **0.703** | 26.6% | 55.4 |
+
+**Why this default:** on the 77 validation clips the BiLSTM alone had the best F1 (0.760 vs 0.719) and
+far fewer false alerts, but it caught **0 of 278** IKAR standing falls, while the context rule caught 211.
+The objective puts recall first, so the default combines both. `VITALYN_FALL_RULE=off` gives the
+BiLSTM-only mode with fewer false alarms.
 
 **Confusion matrices (test):**
 
@@ -255,16 +284,23 @@ All from `cd ml-engine && python3 fall_eval.py report` (test = 209 held-out clip
 | Real fall | TP 11 | FN 74 |
 | No fall | FP 27 | TN 97 |
 
-| Final | Predicted fall | Predicted no fall |
+| Retrained BiLSTM alone | Predicted fall | Predicted no fall |
 |---|---|---|
-| Real fall | TP 54 | FN 31 |
-| No fall | FP 24 | TN 100 |
+| Real fall | TP 49 | FN 36 |
+| No fall | FP 11 | TN 113 |
 
-**Standing falls (IKAR, falls only, recall):** baseline 192/278 (69.1%), final **211/278 (75.9%)**.
-(IKAR was used to choose between two versions, so this is not a held-out estimate.)
+| Final default (BiLSTM + rule) | Predicted fall | Predicted no fall |
+|---|---|---|
+| Real fall | TP 64 | FN 21 |
+| No fall | FP 33 | TN 91 |
 
-**Dev vs test (overfitting check):** final F1 0.645 on dev vs 0.663 on test. Dev and test are close, so no
-sign that the tuning overfitted the dev clips.
+**Standing falls (IKAR, falls only, recall):** baseline 192/278 (69.1%), retrained BiLSTM 0/278, final
+**211/278 (75.9%)**, all from the context rule. IKAR clips are short (median 23 samples, below the
+30-sample window) and the BiLSTM was trained only on bed scenes. IKAR was used to choose the rule's
+anchor, so this is not a held-out estimate.
+
+**Overfitting check:** retrained BiLSTM validation F1 0.760 vs test 0.676, a drop expected from a small
+validation set (77 clips). Context rule dev 0.645 vs test 0.663 (no sign of overfitting).
 
 **Interpreting the errors:**
 * The final version misses 31 of 85 test falls. Likely causes: the person is partly out of view after
@@ -277,12 +313,10 @@ sign that the tuning overfitted the dev clips.
 
 ## 8. Failure cases, limitations and honest answers
 
-1. **The BiLSTM raises no alerts on the evaluation data.** Causes I can show: the earlier analysis found
-   it outputs ~0.96 for all-zero (no-person) windows, so a guard was added (≥ 80% person frames); on real
-   windows its probabilities stay below the 0.45 threshold. Possible reasons: a mismatch between training
-   and evaluation data (frame rate, camera views, normalisation), or a training set too small or
-   different. What would fix it: retrain with a recorded, clip-level train/val/test split on the same
-   preprocessing, and report its learning curves.
+1. **The original BiLSTM raised no alerts on the evaluation data** (it also read empty windows as falls,
+   ~0.96). I retrained it (section 5.2): the retrained model reaches F1 0.676 alone on test and does not
+   read empty windows as falls (tested). **It still misses standing falls** (IKAR 0/278): trained only on
+   bed clips, and IKAR clips are shorter than its 5-second window. The context rule covers them.
 2. Not clinically validated; every alert is a *potential* fall for a person to check.
 3. Camera angle matters: a camera pointing straight down weakens the "lower in the image" signal.
 4. The bed-zone rule needs a bed rectangle; the datasets have none, so it is unit-tested only.
@@ -299,14 +333,16 @@ cd ml-engine
 python3 fall_eval.py baseline     # earlier live logic on dev and test
 python3 fall_eval.py ablate       # BiLSTM only, posture only, context only
 python3 fall_eval.py report       # final comparison table (section 7)
+python3 fall_eval.py v2           # original vs retrained BiLSTM, alone and combined
+python3 train_bilstm.py           # retrain (about 1 minute, identical weights each time)
 python3 fall_eval.py calibrate    # confidence calibration
 python3 -m pytest tests -q        # 168 ML tests
 ```
 Backend tests: `cd backend && python3 -m pytest tests -q` (365). Settings live in `ml-engine/config.py`
 (environment variables, e.g. `VITALYN_FALL_THRESH`, `VITALYN_FALL_RULE=legacy`).
 
-The evaluation is deterministic (fixed split by file-name hash, no random sampling), so no seed is needed.
-Training seeds: **YOU MUST FILL IN** if the notebook set any.
+The evaluation is deterministic (fixed split by file-name hash). Training uses seed 42 on CPU; running it
+twice produced byte-identical weights and history (checked with `shasum`).
 
 ---
 
@@ -314,12 +350,13 @@ Training seeds: **YOU MUST FILL IN** if the notebook set any.
 
 | Question | File and line |
 |---|---|
+| "Show me your training loop" | `ml-engine/train_bilstm.py` `main`: forward pass, weighted BCE, `loss.backward()`, gradient clipping, `opt.step()`, early stopping |
 | "Show me your model" | `ml-engine/bilstm_model.py:29` (class), `:52` `forward` (LSTM → mean pool → fc1 → ReLU → fc2 → sigmoid) |
 | "How do you run inference?" | `ml-engine/bilstm_model.py:81` `predict` (tensor shape (1, 30, 34), `torch.no_grad()`) |
 | "How do you get keypoints?" | `ml-engine/pose_extractor.py:97` `extract_frame_detailed` (YOLO, normalise x/w, y/h) |
 | "How does the live sliding window work?" | `ml-engine/streaming_detector.py:85` `push`, coverage guard `:32` |
 | "Explain your fall rule" | `ml-engine/fall_context.py:121` `_evaluate` (drop, settled, speed), `:156` `update` |
-| "Where is the threshold?" | `ml-engine/config.py:38` `FALL_THRESHOLD = 0.45` |
+| "Where is the threshold?" | `ml-engine/config.py` `FALL_THRESHOLD` (0.65 for the retrained model, 0.45 for the original) |
 | "How did you split the data?" | `ml-engine/fall_eval.py:58` `split_of` |
 | "How are metrics computed?" | `ml-engine/fall_eval.py:237` `evaluate` |
 | "What was the baseline?" | `ml-engine/fall_eval.py:167` `baseline_detector` |
@@ -328,8 +365,9 @@ Training seeds: **YOU MUST FILL IN** if the notebook set any.
 | "How does the phone stream?" | `backend/phone_gateway.py:405` `patient_ws` (JPEG frames over WebSocket) |
 | "Who can see video?" | `backend/auth.py:242` `require_roles` |
 
-**Changed-input test the panel may ask for:** change `VITALYN_FALL_THRESH` (e.g. 0.3) or run
-`VITALYN_FALL_RULE=legacy python3 fall_eval.py report` and explain how precision and recall move.
+**Changed-input test the panel may ask for:** change `VITALYN_FALL_THRESH` (e.g. 0.3 or 0.8) and explain
+how precision and recall move, or switch the rule with `VITALYN_FALL_RULE=off` / `legacy` (restart the
+backend afterwards for the live app).
 
 ---
 
@@ -342,8 +380,8 @@ Training seeds: **YOU MUST FILL IN** if the notebook set any.
 | 1:45-3:30 | **Live:** Watch Live, select a patient, phone camera on. Lie on a bed/table (no alert), then sit up (no alert), then lower to the floor quickly and stay (alert) | Point at the skeleton overlay and the status. Explain "potential fall, needs review" |
 | 3:30-4:15 | Acknowledge the alert as a nurse | Name is recorded; human in the loop |
 | 4:15-6:15 | Terminal: `python3 fall_eval.py report` | Data split, baseline vs final table, confusion matrix |
-| 6:15-7:15 | Model slide | BiLSTM layers, loss, why bidirectional, why keypoints |
-| 7:15-8:00 | Limitations slide | BiLSTM gives no alerts on this data; not validated; camera angle; next steps |
+| 6:15-7:15 | Model + learning-curve slide | BiLSTM layers, BCE loss, Adam, early stopping at epoch 20, why bidirectional |
+| 7:15-8:00 | Limitations slide | Original model failed → retrained; BiLSTM misses standing falls; false alerts; not validated |
 
 **If the live demo fails:** go straight to the terminal evaluation (it needs no camera, no internet), and
 say what failed.
@@ -352,7 +390,7 @@ say what failed.
 1. Problem and objective (falls in wards, recall first, potential events only)
 2. Data and split (FallVision 616 clips, IKAR 278 videos, clip-level 70/30 split, no augmentation)
 3. Pipeline (section 4 diagram)
-4. Models (YOLOv8n-pose frozen; BiLSTM table; context rule 5 steps)
+4. Models and training (YOLOv8n-pose frozen; BiLSTM table; training settings; learning curves; context rule)
 5. Results (table + confusion matrices + IKAR recall)
 6. Limitations, next steps, acknowledgements and AI disclosure
 
@@ -390,17 +428,19 @@ say what failed.
     or lying down also changes the box shape. It looked at shape, not where the body ends up.
 17. **How does your rule tell bed from floor?** It compares where the body ends with where it was resting,
     in torso lengths, and can use a bed rectangle. Falling off a bed ends much lower; turning over does not.
-18. **Your deep model raises no alerts. Is this a deep learning project?** Yes. The perception is deep
-    learning (pose CNN), the temporal model is a BiLSTM, and the project contains a rigorous evaluation
-    that *found* the BiLSTM does not generalise to this data. I reported that instead of hiding it, and
-    added a measured, explainable layer while keeping the BiLSTM in the pipeline. Next step: retrain it
-    with a recorded split.
-19. **Why might the BiLSTM fail here?** Distribution shift (different cameras, frame rate, normalisation
-    between training data and these clips), possibly small or different training data, plus a threshold
-    tuned elsewhere.
-20. **How would you improve it?** Retrain on FallVision with a clip-level split, class weights for
-    imbalance, augmentation (mirroring, small rotations, time stretching), early stopping on validation
-    F1, then compare against the rule with the same harness.
+18. **Why did you retrain the BiLSTM?** My evaluation showed the original checkpoint raised no alerts on
+    held-out clips and read empty frames as falls. I retrained it with a clip-level split, class weighting,
+    augmentation and early stopping. Alone it now reaches F1 0.676, precision 0.817 on test.
+19. **Why does the BiLSTM miss standing falls?** It only saw bed scenes in training, and the IKAR clips are
+    shorter than its 5-second window, so the windows are mostly padding. Training on standing falls (and
+    shorter windows) would be the next step.
+20. **Why combine it with a rule instead of using the BiLSTM alone?** On validation the BiLSTM alone had
+    the best F1 and fewest false alarms, but missed every standing fall. Recall comes first in a hospital,
+    so the default adds the rule; the BiLSTM-only mode is one setting away.
+20b. **How did you choose the threshold 0.65?** By scanning 0.20-0.90 on the validation clips with the live
+    decision rule and taking the best F1. Not on test.
+20c. **Does it overfit?** Training loss keeps falling but validation loss stops improving after about epoch
+    5; validation F1 peaks at epoch 20, so early stopping keeps that model. Validation F1 0.76 vs test 0.68.
 21. **What is calibration and why?** Making the confidence match how often alerts are right. Brier score
     0.257 → 0.211 on test.
 22. **What happens if no person is visible?** The frame becomes zeros; windows with < 80% person frames
@@ -417,8 +457,8 @@ say what failed.
 ## 14. Acknowledgements and AI disclosure (put on the last slide)
 
 * **Pretrained model:** YOLOv8n-pose by Ultralytics (COCO keypoints), used frozen.
-* **BiLSTM:** trained in a separate notebook. **YOU MUST FILL IN:** who trained it, on what data, and
-  where the notebook is.
+* **BiLSTM:** retrained by me with `ml-engine/train_bilstm.py` (recorded run included). The original
+  checkpoint came from an earlier notebook (kept for comparison only).
 * **Datasets:** FallVision (bed subset, keypoint CSVs); IKAR fall dataset (CC BY 4.0, credit the authors
   as in `datasets/doi-10/00_readme.md`).
 * **Libraries:** PyTorch, Ultralytics, OpenCV, NumPy, pandas, scikit-learn (calibration), FastAPI,
@@ -431,9 +471,9 @@ say what failed.
 
 ## 15. Checklist for tonight and tomorrow morning
 
-- [ ] Find the BiLSTM training notebook; fill in every **YOU MUST FILL IN** above.
+- [ ] Read `ml-engine/train_bilstm.py` top to bottom once; open `learning_curves.png` and explain it out loud.
 - [ ] Do not quote `docs/research/DATASET_RESEARCH.md`; it does not match the real data.
-- [ ] Copy the project, `ml-engine/*.pt` weights and `datasets/` to a USB drive (weights and data are not in git).
+- [ ] Copy the project, `ml-engine/*.pt` weights (especially `vitalyn_fall_bilstm_v2.pt`) and `datasets/` to a USB drive (weights and data are not in git; `train_bilstm.py` can recreate the v2 weights in about a minute).
 - [ ] Run `python3 fall_eval.py report` once and keep the output on screen as a fallback.
 - [ ] Laptop charged; phone charged; phone on the same Wi-Fi or a hotspot; regenerate the patient QR on the venue network.
 - [ ] Open the app once so Supabase is awake; signed in as admin before your slot.

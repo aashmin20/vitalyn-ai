@@ -126,3 +126,5 @@ def test_rule_detector_modes():
     legacy = RuleFallDetector("legacy")
     assert all(legacy.update(f) is None for f in [person(BED_Y)] * 50)     # lying the whole time
     assert RuleFallDetector("nonsense").mode == "context"
+    off = RuleFallDetector("off")
+    assert all(off.update(f) is None for f in frames)

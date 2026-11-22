@@ -64,14 +64,16 @@ class FallClassifier:
     Thread-safe after __init__.
     """
 
-    def __init__(self):
+    def __init__(self, path: Optional[str] = None, threshold: Optional[float] = None):
         self._model: Optional[BiLSTMFallClassifier] = None
         self._device = "mps" if torch.backends.mps.is_available() else "cpu"
+        self.path = path or BILSTM_MODEL_PATH
+        self.threshold = FALL_THRESHOLD if threshold is None else threshold
 
     def _load(self) -> BiLSTMFallClassifier:
         if self._model is None:
             model = BiLSTMFallClassifier()
-            state = torch.load(BILSTM_MODEL_PATH, map_location="cpu", weights_only=True)
+            state = torch.load(self.path, map_location="cpu", weights_only=True)
             model.load_state_dict(state)
             model.eval()
             model.to(self._device)
@@ -96,4 +98,4 @@ class FallClassifier:
         with torch.no_grad():
             prob = model(x).item()
 
-        return prob, prob >= FALL_THRESHOLD
+        return prob, prob >= self.threshold

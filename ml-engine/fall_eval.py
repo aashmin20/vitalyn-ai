@@ -49,6 +49,7 @@ class Clip:
     label: int                                   # 1 = fall clip, 0 = non-fall clip
     kpts: List[Optional[np.ndarray]]             # per sample: (17, 3) x, y, confidence in pixels, or None
     split: str = "dev"
+    size: tuple = (FRAME_SIZE, FRAME_SIZE)       # frame (width, height) used to normalise model input
 
     @property
     def n(self) -> int:
@@ -86,11 +87,11 @@ def load_clips(limit: Optional[int] = None) -> List[Clip]:
     return clips
 
 
-def to_vector(k: Optional[np.ndarray]) -> np.ndarray:
+def to_vector(k: Optional[np.ndarray], size: tuple = (FRAME_SIZE, FRAME_SIZE)) -> np.ndarray:
     """The 34-value model input, exactly like the training/pose extractor: x/w, y/h interleaved."""
     if k is None:
         return np.zeros(34, dtype=np.float32)
-    return (k[:, :2] / FRAME_SIZE).reshape(-1).astype(np.float32)
+    return (k[:, :2] / np.array(size, dtype=float)).reshape(-1).astype(np.float32)
 
 
 # ── IKAR standing falls (videos, falls only): pose extracted once, cached ──────────────────
@@ -129,12 +130,21 @@ def extract_ikar() -> None:
 
 
 def load_ikar() -> List[Clip]:
+    import cv2
     data = np.load(IKAR_CACHE)
+    paths = {os.path.basename(p): p for p in glob.glob(os.path.join(IKAR_DIR, "*", "videos", "*.mp4"))}
     clips = []
     for name in sorted(data.files):
         arr = data[name]
         kpts = [None if not np.any(f[:, :2]) else f for f in arr]
-        clips.append(Clip(name, 1, kpts, "ikar"))
+        size = (FRAME_SIZE, FRAME_SIZE)
+        if name in paths:                               # normalise by the real frame size, like the live pipeline
+            cap = cv2.VideoCapture(paths[name])
+            w, h = cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            cap.release()
+            if w and h:
+                size = (float(w), float(h))
+        clips.append(Clip(name, 1, kpts, "ikar", size))
     return clips
 
 
@@ -157,10 +167,11 @@ _classifier = None
 
 
 def shared_classifier():
+    """The ORIGINAL checkpoint with its original threshold: part of the fixed baseline."""
     global _classifier
     if _classifier is None:
         from bilstm_model import FallClassifier
-        _classifier = FallClassifier()
+        _classifier = FallClassifier(os.path.join(HERE, "vitalyn_fall_bilstm.pt"), threshold=0.45)
     return _classifier
 
 
@@ -173,7 +184,7 @@ def baseline_detector(clip: Clip) -> List[int]:
     posture = PostureTransitionDetector()
     alerts: List[int] = []
     for i, k in enumerate(clip.kpts):
-        if stream.push(to_vector(k)) is not None:
+        if stream.push(to_vector(k, clip.size)) is not None:
             alerts.append(i)
         ar, h = person_box(k, KPT_CONF_MIN)
         if posture.update(ar, h)[0]:
@@ -218,7 +229,23 @@ def union(*detectors: Detector) -> Detector:
 def bilstm_only(clip: Clip) -> List[int]:
     from streaming_detector import StreamingFallDetector
     stream = StreamingFallDetector(shared_classifier())
-    return merge_alerts([i for i, k in enumerate(clip.kpts) if stream.push(to_vector(k)) is not None])
+    return merge_alerts([i for i, k in enumerate(clip.kpts) if stream.push(to_vector(k, clip.size)) is not None])
+
+
+V2_WEIGHTS = os.path.join(HERE, "vitalyn_fall_bilstm_v2.pt")
+_v2 = None
+
+
+def bilstm_v2_only(clip: Clip) -> List[int]:
+    """The retrained BiLSTM (train_bilstm.py) with its validation-chosen threshold, live decision rules."""
+    global _v2
+    from streaming_detector import StreamingFallDetector
+    if _v2 is None:
+        from bilstm_model import FallClassifier
+        summary = json.load(open(os.path.join(HERE, "training", "runs", "bilstm_v2", "summary.json")))
+        _v2 = FallClassifier(V2_WEIGHTS, summary["decision_threshold"])
+    stream = StreamingFallDetector(_v2)
+    return merge_alerts([i for i, k in enumerate(clip.kpts) if stream.push(to_vector(k, clip.size)) is not None])
 
 
 def posture_only(clip: Clip) -> List[int]:
@@ -318,12 +345,27 @@ def main(argv: List[str]) -> int:
         return 0
     if mode == "report":
         # Final comparison with the settings now in ContextConfig (chosen on DEV), scored on TEST.
-        for label, det in (("baseline (live logic today)", baseline_detector),
+        for label, det in (("baseline (original live logic)", baseline_detector),
                            ("context detector", context_detector()),
                            ("context + posture rule", union(context_detector(), posture_only)),
-                           ("context + BiLSTM", union(context_detector(), bilstm_only))):
+                           ("context + original BiLSTM", union(context_detector(), bilstm_only)),
+                           ("FINAL: retrained BiLSTM + context", union(bilstm_v2_only, context_detector()))):
             for name, subset in (("dev", dev), ("TEST", test)):
                 print(fmt(f"{label} [{name}]", evaluate(subset, det)))
+        return 0
+    if mode == "v2":
+        # Retrained BiLSTM vs the original checkpoint, alone and with the context rule. TEST is held out.
+        ikar = load_ikar() if os.path.exists(IKAR_CACHE) else []
+        for label, det in (("original BiLSTM only", bilstm_only),
+                           ("retrained BiLSTM only", bilstm_v2_only),
+                           ("context rule only", context_detector()),
+                           ("retrained BiLSTM + context rule", union(bilstm_v2_only, context_detector())),
+                           ("original BiLSTM + context rule", union(bilstm_only, context_detector()))):
+            for name, subset in (("dev", dev), ("TEST", test)):
+                print(fmt(f"{label} [{name}]", evaluate(subset, det)))
+            if ikar:
+                hits = sum(1 for c in ikar if det(c))
+                print(f"{'':34s} IKAR standing-fall recall {hits}/{len(ikar)} = {hits / len(ikar):.3f}")
         return 0
     if mode == "calibrate":
         # Alert-level calibration: is an alert raised in a fall clip? Fit on DEV, check on TEST.

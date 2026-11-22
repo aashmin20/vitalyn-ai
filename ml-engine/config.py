@@ -7,7 +7,12 @@ import os
 ML_ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR   = os.path.join(ML_ENGINE_DIR, "..", "backend")
 
-BILSTM_MODEL_PATH = os.path.join(ML_ENGINE_DIR, "vitalyn_fall_bilstm.pt")
+# The retrained BiLSTM (train_bilstm.py, recorded run in training/runs/bilstm_v2) is used when present;
+# otherwise the original checkpoint. Override with VITALYN_BILSTM_WEIGHTS.
+_V2_WEIGHTS = os.path.join(ML_ENGINE_DIR, "vitalyn_fall_bilstm_v2.pt")
+_V1_WEIGHTS = os.path.join(ML_ENGINE_DIR, "vitalyn_fall_bilstm.pt")
+BILSTM_MODEL_PATH = os.getenv("VITALYN_BILSTM_WEIGHTS") or (_V2_WEIGHTS if os.path.exists(_V2_WEIGHTS) else _V1_WEIGHTS)
+USING_RETRAINED_BILSTM = os.path.abspath(BILSTM_MODEL_PATH) == os.path.abspath(_V2_WEIGHTS)
 BACKEND_DB_PATH   = os.path.abspath(os.path.join(BACKEND_DIR, "vitalyn.db"))
 
 # ── Pose model ──────────────────────────────────────────────────────────────
@@ -35,7 +40,8 @@ WINDOW_STEP = int(os.getenv("VITALYN_WIN_STEP", "15"))
 # ── Fall classification threshold ───────────────────────────────────────────
 # Sigmoid output from BiLSTM.  >threshold → fall.
 # Lowered slightly from 0.5 to bias toward recall (miss no falls).
-FALL_THRESHOLD = float(os.getenv("VITALYN_FALL_THRESH", "0.45"))
+# 0.65 was chosen on the validation clips for the retrained model; 0.45 belongs to the original checkpoint.
+FALL_THRESHOLD = float(os.getenv("VITALYN_FALL_THRESH", "0.65" if USING_RETRAINED_BILSTM else "0.45"))
 
 # Minimum windows in a row that must exceed threshold before an event fires
 # (prevents single-window false positives)
@@ -50,6 +56,7 @@ MIN_PERSON_COVERAGE = float(os.getenv("VITALYN_MIN_PERSON_COVERAGE", "0.8"))
 # Which rule-based fall check runs beside the BiLSTM:
 #   "context" (default) - descent below the resting level, then settling (fall_context.py)
 #   "legacy"            - the older upright-to-horizontal posture rule (fall_heuristic.py)
+#   "off"               - BiLSTM alone (fewest false alerts, but misses standing falls)
 # See docs/evaluation/FALL_DETECTION_IMPROVEMENT.md for the measured difference.
 FALL_RULE = os.getenv("VITALYN_FALL_RULE", "context").strip().lower()
 

@@ -56,9 +56,42 @@ from 0.257 (raw score) to 0.211. The slope is small: the score separates real fr
 weakly, so the confidence shown to staff is close to "about 2 in 3 alerts like this were real falls in the
 development data". It is not a clinical probability.
 
+## Retrained BiLSTM (train_bilstm.py)
+
+The original checkpoint raised no alerts on this data, so the BiLSTM was retrained with the **same
+architecture** and a recorded, reproducible run (`ml-engine/training/runs/bilstm_v2/`: summary, history,
+learning curves). Re-running `python3 train_bilstm.py` gives bit-identical weights (seed 42, CPU).
+
+* Data: TRAIN = 330 dev clips (129 fall) -> 5,171 windows of 30 frames (stride 5) with >= 80% person
+  frames; VALIDATION = 77 dev clips (29 fall), split by clip name; TEST clips never used.
+* Adam, learning rate 1e-3, weight decay 1e-4, batch 64, max 40 epochs, early stopping on validation F1
+  (patience 8, best epoch 20), dropout 0.3, gradient clipping 1.0, BCE with the fall class weighted 1.97
+  (non-fall/fall ratio). Augmentation: mirror (left/right joints swapped), +-3% shift, +-8% scale.
+* Decision threshold 0.65, chosen on validation clips with the live rules (two windows in a row).
+
+Held-out TEST (209 clips) with live decision rules:
+
+| Model | Precision | Recall | F1 | False alerts / hour | IKAR standing falls |
+|---|---|---|---|---|---|
+| Original BiLSTM alone | no alerts | 0 | 0 | 0 | 0/278 |
+| Retrained BiLSTM alone | 0.817 | 0.577 | 0.676 | 17.4 | 0/278 |
+| Context rule alone | 0.692 | 0.635 | 0.663 | 38.0 | 211/278 |
+| **Default: retrained BiLSTM + context rule** | 0.660 | **0.753** | **0.703** | 55.4 | 211/278 |
+
+**Choice of default.** On the 77 validation clips (not used for training) the BiLSTM alone had the best
+F1 (0.760 vs 0.719 combined) and far fewer false alerts, but it detects **no standing falls** (IKAR clips
+are short, median 23 samples against a 30-sample window, and it was trained only on bed scenes). Because
+the objective puts recall first and standing falls are common, the default is BiLSTM + context rule;
+`VITALYN_FALL_RULE=off` runs the BiLSTM alone when fewer false alarms matter more. The original checkpoint
+remains available with `VITALYN_BILSTM_WEIGHTS=ml-engine/vitalyn_fall_bilstm.pt`.
+
+Overfitting evidence: training loss falls steadily while validation loss is noisy and stops improving
+after about epoch 5; validation F1 still rises to epoch 20, hence early stopping on F1. Validation has
+only 77 clips, so its numbers are uncertain.
+
 ## Limitations (read before any claim)
 * Not clinically validated. Every alert remains a potential event for staff review.
-* The BiLSTM's training clips are unknown; it contributes no alerts on this data.
+* The ORIGINAL BiLSTM's training record is unknown and it contributes no alerts on this data; the retrained model replaces it by default.
 * False alerts per hour fell only slightly (42.8 -> 38.0). The big change is precision and recall.
 * The bed-zone rule needs a bed rectangle, which the datasets do not have, so it is unit-tested only.
 * "Lower in the image" means closer to the floor for side or angled cameras; it is weak for a camera

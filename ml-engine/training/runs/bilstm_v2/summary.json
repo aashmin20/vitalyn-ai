@@ -1,0 +1,36 @@
+{
+  "config": {
+    "seed": 42,
+    "seq_len": 30,
+    "train_stride": 5,
+    "eval_step": 15,
+    "min_coverage": 0.8,
+    "min_consecutive": 2,
+    "val_percent_of_dev": 20,
+    "batch_size": 64,
+    "epochs": 40,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "optimizer": "Adam",
+    "loss": "BCELoss (sigmoid output), positive class weighted by neg/pos ratio",
+    "dropout": 0.3,
+    "early_stopping_patience": 8,
+    "augment_mirror_p": 0.5,
+    "augment_shift": 0.03,
+    "augment_scale": 0.08
+  },
+  "best_epoch": 20,
+  "decision_threshold": 0.65,
+  "validation": {
+    "precision": 0.913,
+    "recall": 0.7241,
+    "f1": 0.8077,
+    "clips": 77
+  },
+  "train_clips": 330,
+  "train_windows": 5171,
+  "positive_weight": 1.965,
+  "parameters": 154689,
+  "seconds": 59.1,
+  "weights": "vitalyn_fall_bilstm_v2.pt"
+}

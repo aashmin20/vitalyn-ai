@@ -63,17 +63,22 @@ class TestFallClassifierPredict:
         prob, is_fall = fall_classifier.predict(standing_seq)
         assert is_fall == (prob >= FALL_THRESHOLD)
 
-    def test_zero_input_high_probability(self, fall_classifier, zero_seq):
-        """
-        All-zero input (no person detected) → high fall probability.
-        This is the primary BiLSTM signal: missing person may indicate a fall.
-        """
-        prob, is_fall = fall_classifier.predict(zero_seq)
-        assert prob > 0.5, (
-            f"Expected prob > 0.5 for no-person input, got {prob:.4f}. "
-            "BiLSTM should flag absence of person as potential fall."
-        )
-        assert is_fall is True
+    def test_original_checkpoint_reads_an_empty_window_as_a_fall(self, zero_seq):
+        """Known flaw of the ORIGINAL checkpoint (why the 80% person-coverage guard exists)."""
+        import os
+        from config import ML_ENGINE_DIR
+        original = FallClassifier(os.path.join(ML_ENGINE_DIR, "vitalyn_fall_bilstm.pt"), threshold=0.45)
+        prob, _ = original.predict(zero_seq)
+        assert prob > 0.5
+
+    def test_retrained_model_does_not_read_an_empty_window_as_a_fall(self, zero_seq):
+        import os
+        from config import ML_ENGINE_DIR
+        path = os.path.join(ML_ENGINE_DIR, "vitalyn_fall_bilstm_v2.pt")
+        if not os.path.exists(path):
+            pytest.skip("retrained weights not present (run train_bilstm.py)")
+        prob, is_fall = FallClassifier(path, threshold=0.65).predict(zero_seq)
+        assert prob < 0.5 and not is_fall
 
     def test_deterministic_in_eval_mode(self, fall_classifier, standing_seq):
         """Same input must produce identical output (model is in eval mode, no dropout)."""
