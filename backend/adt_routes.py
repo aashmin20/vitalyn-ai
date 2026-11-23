@@ -21,7 +21,7 @@ from patient_routes import (
     _check_refs, _get_patient, _kick_phone, _patient_out, _stop_live_if_patient,
     camera_link_for, new_camera_token,
 )
-from permissions import CLINICAL, REGISTRARS
+from permissions import ADMIN, CLINICAL, REGISTRARS
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(current_user)])
 
@@ -169,6 +169,29 @@ def set_bed_status(bed_id: uuid.UUID, body: BedStatusBody, request: Request,
     return {"id": str(bed.id), "status": bed.status}
 
 
+@router.patch("/rooms/{room_id}/status")
+def set_room_status(room_id: uuid.UUID, body: BedStatusBody, request: Request,
+                    session: Session = Depends(get_session),
+                    user: AuthUser = Depends(require_roles(*ADMIN))):
+    """Mark a whole room cleaning / under maintenance / ready. Applies to every vacant
+    bed; occupied beds are left alone (move the patient first) and reported back."""
+    room = session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    changed, skipped = [], []
+    for bed in session.exec(select(Bed).where(Bed.room_id == room_id).order_by(Bed.bed_number)).all():
+        if adt.occupant(session, bed.id) is not None:
+            skipped.append(bed.bed_number)
+            continue
+        bed.status = body.status
+        session.add(bed)
+        changed.append(bed.bed_number)
+    audit.record(session, user, "room.status", "room", room.id,
+                 {"status": body.status, "beds": changed, "skipped_occupied": skipped}, request)
+    session.commit()
+    return {"id": str(room.id), "status": body.status, "changed": changed, "skipped_occupied": skipped}
+
+
 def _monitored_ids() -> set:
     import sys
     mod = sys.modules.get("live_pipeline")
@@ -209,8 +232,10 @@ def ward_board(session: Session = Depends(get_session), user: AuthUser = Depends
             beds.append({"id": str(bed.id), "bed_number": bed.bed_number, "status": status,
                          "patient": occupant_out(p) if p else None})
         unassigned = [occupant_out(p) for p in patients if p.room_id == room.id and not p.bed_id]
+        summary = {s: sum(1 for b in beds if b["status"] == s)
+                   for s in ("occupied", "available", "cleaning", "maintenance")}
         rooms.append({"id": str(room.id), "room_number": room.room_number, "floor": room.floor,
-                      "beds": beds, "unassigned": unassigned})
+                      "beds": beds, "unassigned": unassigned, "summary": summary})
     counts = {s: sum(1 for r in rooms for b in r["beds"] if b["status"] == s)
               for s in ("occupied", "available", "cleaning", "maintenance")}
     return {"rooms": rooms, "counts": counts}

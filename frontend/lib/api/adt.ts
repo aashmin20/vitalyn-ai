@@ -29,6 +29,7 @@ export interface BoardRoom {
   floor: string;
   beds: BoardBed[];
   unassigned: BoardPatient[];
+  summary: Record<BedState, number>;
 }
 
 export interface WardBoard {
@@ -64,6 +65,13 @@ export const setBedStatus = (bedId: string, status: "available" | "cleaning" | "
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+
+/** Admin: mark every vacant bed in a room; occupied beds are skipped and reported. */
+export const setRoomStatus = (roomId: string, status: "available" | "cleaning" | "maintenance") =>
+  apiFetch<{ id: string; status: string; changed: string[]; skipped_occupied: string[] }>(
+    `/api/v1/rooms/${roomId}/status`,
+    { method: "PATCH", body: JSON.stringify({ status }) },
+  );
 
 /** Free beds in one room, from the ward board. */
 export const freeBeds = (board: WardBoard | null, roomId: string): BoardBed[] =>

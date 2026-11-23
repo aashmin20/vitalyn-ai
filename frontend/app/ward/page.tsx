@@ -2,23 +2,16 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { BedDouble, Video, AlertTriangle } from "lucide-react";
+import { BedDouble } from "lucide-react";
 import { usePoll } from "@/lib/hooks/usePoll";
-import { getWardBoard, setBedStatus, type BedState, type BoardBed, type WardBoard } from "@/lib/api/adt";
+import { getWardBoard, setBedStatus, type BoardBed, type WardBoard } from "@/lib/api/adt";
 import { describeApiError } from "@/lib/api/patients";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { BED_LABEL, BED_ORDER, BED_STYLE as STYLE, BedTile } from "@/components/beds/BedTile";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DemoDataBanner } from "@/components/patients/DemoDataBanner";
 import { cn } from "@/lib/utils";
-
-const STYLE: Record<BedState, string> = {
-  occupied: "border-slate-300 bg-white",
-  available: "border-emerald-200 bg-emerald-50",
-  cleaning: "border-amber-200 bg-amber-50",
-  maintenance: "border-slate-200 bg-slate-100 text-slate-500",
-};
 
 export default function WardBoardPage() {
   const { user } = useAuth();
@@ -49,8 +42,8 @@ export default function WardBoardPage() {
 
       {board && (
         <div className="flex flex-wrap gap-2 text-xs">
-          {(["occupied", "available", "cleaning", "maintenance"] as BedState[]).map((s) => (
-            <span key={s} className={cn("rounded-full border px-3 py-1", STYLE[s])}>{board.counts[s]} {s}</span>
+          {BED_ORDER.map((s) => (
+            <span key={s} className={cn("rounded-full border px-3 py-1", STYLE[s])}>{board.counts[s]} {BED_LABEL[s].toLowerCase()}</span>
           ))}
         </div>
       )}
@@ -60,7 +53,7 @@ export default function WardBoardPage() {
       ) : error || !board ? (
         <p className="text-sm text-red-600">Could not load the ward board.</p>
       ) : board.rooms.length === 0 ? (
-        <p className="text-sm text-slate-400">No rooms yet. Add rooms and beds under Hospital Ops.</p>
+        <p className="text-sm text-slate-400">No rooms yet. An admin can add rooms and beds under Rooms and beds.</p>
       ) : (
         board.rooms.map((room) => (
           <Card key={room.id}>
@@ -70,34 +63,7 @@ export default function WardBoardPage() {
               </p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {room.beds.map((bed) => (
-                  <div key={bed.id} className={cn("rounded-lg border p-3 text-sm", STYLE[bed.status])}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium">Bed {bed.bed_number}</span>
-                      <span className="text-[11px] capitalize">{bed.status}</span>
-                    </div>
-                    {bed.patient ? (
-                      <Link href={`/patients/${bed.patient.id}`} className="mt-2 block hover:underline">
-                        <p className="font-medium text-slate-900">{bed.patient.name}, {bed.patient.age}</p>
-                        <p className="font-mono text-[11px] text-slate-500">{bed.patient.patient_code}</p>
-                        <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
-                          {bed.patient.monitored && (
-                            <span className="inline-flex items-center gap-1 text-emerald-700"><Video className="h-3 w-3" /> monitored</span>
-                          )}
-                          {!!bed.patient.active_alerts && (
-                            <span className="inline-flex items-center gap-1 font-medium text-red-600">
-                              <AlertTriangle className="h-3 w-3" /> {bed.patient.active_alerts} possible fall
-                            </span>
-                          )}
-                        </div>
-                      </Link>
-                    ) : canBeds && bed.status !== "occupied" ? (
-                      <div className="mt-2 flex gap-1">
-                        {bed.status !== "available" && <Button size="sm" variant="outline" onClick={() => change(bed, "available")}>Mark ready</Button>}
-                        {bed.status === "available" && <Button size="sm" variant="ghost" onClick={() => change(bed, "cleaning")}>Cleaning</Button>}
-                        {bed.status !== "maintenance" && <Button size="sm" variant="ghost" onClick={() => change(bed, "maintenance")}>Maintenance</Button>}
-                      </div>
-                    ) : null}
-                  </div>
+                  <BedTile key={bed.id} bed={bed} canChange={canBeds} onChange={change} />
                 ))}
                 {room.unassigned.map((p) => (
                   <Link key={p.id} href={`/patients/${p.id}`} className="rounded-lg border border-dashed border-slate-300 p-3 text-sm hover:underline">

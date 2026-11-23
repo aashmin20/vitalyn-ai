@@ -1,6 +1,7 @@
 from fastapi import HTTPException, Depends, APIRouter, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from typing import List, Optional
+from pydantic import BaseModel, Field as PField
 from sqlmodel import Session, select, func
 from datetime import datetime, timezone
 import uuid
@@ -93,8 +94,58 @@ def list_beds(session: Session = Depends(get_session)):
     return session.exec(select(Bed)).all()
 
 
+def _room_bed_numbers(session: Session, room_id) -> set:
+    return {b.bed_number for b in session.exec(select(Bed).where(Bed.room_id == room_id)).all()}
+
+
+class AddBedsBody(BaseModel):
+    """Either explicit bed numbers (e.g. ["A", "B"]) or a count, auto-numbered 1, 2, 3..."""
+    bed_numbers: Optional[List[str]] = None
+    count: Optional[int] = PField(default=None, ge=1, le=50)
+
+
+@router.post("/rooms/{room_id}/beds", status_code=201)
+def add_beds(room_id: uuid.UUID, body: AddBedsBody, request: Request,
+             session: Session = Depends(get_session),
+             user: AuthUser = Depends(require_roles(*ADMIN))):
+    room = session.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    existing = _room_bed_numbers(session, room_id)
+    if body.bed_numbers:
+        numbers = [n.strip() for n in body.bed_numbers if n and n.strip()]
+        if not numbers:
+            raise HTTPException(status_code=422, detail="Give at least one bed number.")
+        if any(len(n) > 20 for n in numbers):
+            raise HTTPException(status_code=422, detail="Bed numbers can be at most 20 characters.")
+        dupes = sorted({n for n in numbers if n in existing or numbers.count(n) > 1})
+        if dupes:
+            raise HTTPException(status_code=409,
+                                detail=f"Room {room.room_number} already has bed {', '.join(dupes)}.")
+    elif body.count:
+        numbers, n = [], 1
+        while len(numbers) < body.count:
+            if str(n) not in existing:
+                numbers.append(str(n))
+            n += 1
+    else:
+        raise HTTPException(status_code=422, detail="Give bed numbers or how many beds to add.")
+    beds = [Bed(bed_number=n, room_id=room_id, status="available") for n in numbers]
+    for bed in beds:
+        session.add(bed)
+    audit.record(session, user, "bed.create", "room", room.id, {"beds": numbers}, request)
+    session.commit()
+    return [{"id": str(b.id), "bed_number": b.bed_number, "room_id": str(room_id), "status": b.status}
+            for b in beds]
+
+
 @router.post("/beds", response_model=Bed, dependencies=[Depends(require_roles(*ADMIN))])
 def create_bed(bed: Bed, session: Session = Depends(get_session)):
+    bed.bed_number = bed.bed_number.strip()
+    if not bed.bed_number:
+        raise HTTPException(status_code=422, detail="Bed number is required.")
+    if bed.room_id is not None and bed.bed_number in _room_bed_numbers(session, bed.room_id):
+        raise HTTPException(status_code=409, detail=f"That room already has bed {bed.bed_number}.")
     session.add(bed)
     session.commit()
     session.refresh(bed)
