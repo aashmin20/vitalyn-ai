@@ -36,8 +36,9 @@ import numpy as np
 from pose_extractor import PoseExtractor, SAMPLE_FPS
 from bilstm_model import FallClassifier
 from fall_context import RuleFallDetector
-from live_status import StatusTracker
-from config import FALL_RULE, FALL_RULE_VETO, FALL_THRESHOLD, USING_RETRAINED_BILSTM
+from live_status import HIGH_AT, MEDIUM_AT, StatusTracker
+from fall_risk import FloorPostureMonitor
+from config import FALL_RULE, FALL_RULE_VETO, FALL_THRESHOLD, POSTURE_ALERTS, USING_RETRAINED_BILSTM
 from streaming_detector import StreamingFallDetector, TARGET_SEQ_LEN
 import db_writer
 
@@ -49,6 +50,7 @@ OCCUPANCY_INTERVAL_S = 5.0     # one occupancy record per interval
 OUTBOX_FLUSH_S = 15.0           # retry queued fall events this often
 EVENT_MIN_GAP_S = 10.0         # merge BiLSTM + heuristic triggers closer than this
 ALARM_OVERLAY_S = 10.0
+POSTURE_HOLD_SAMPLES = 12      # posture score must stay at HIGH for 2 s (6 Hz) before it raises an alert
 MAX_READ_FAILURES = 30
 MAX_RECONNECTS = 3
 KPT_CONF_MIN = 0.3
@@ -219,6 +221,9 @@ class LiveSession:
         self._sample_fps = sample_fps
         self._rules = RuleFallDetector(FALL_RULE, veto_below=FALL_RULE_VETO)
         self._assess = StatusTracker(FALL_THRESHOLD)
+        self._posture = FloorPostureMonitor()
+        self._posture_high = 0               # consecutive samples at HIGH posture risk
+        self._posture_latched = False        # one posture alert until the risk falls back below MEDIUM
         self._windows_seen = 0
 
         self._stop = threading.Event()
@@ -395,12 +400,22 @@ class LiveSession:
     def _detector_len(self) -> int:
         return getattr(self._detector, "_seq_len", TARGET_SEQ_LEN)
 
+    def _publish_risk(self) -> None:
+        """Push the risk level to live subscribers when it changes, so the panel updates at once."""
+        a = self._assess.last
+        key = (a["code"], None if a.get("risk") is None else int(a["risk"] // 5))
+        if key != getattr(self, "_risk_key", None):
+            self._risk_key = key
+            self._publish({"type": "risk", "assessment": a})
+
     def _status_text(self, alarm: bool) -> str:
         a = self._assess.last
         if alarm:
-            return "POTENTIAL FALL DETECTED - human review required"
-        if a.get("fall_confidence") is not None:
-            return f"{a['label']} | fall {a['fall_confidence']:.0f}% / normal {a['normal_confidence']:.0f}%"
+            return "FALL DETECTED - human review required"
+        if a.get("risk") is not None:
+            ascii_label = {"normal": "Normal activity", "low": "Low fall risk", "medium": "POTENTIAL FALL",
+                           "high": "FALL DETECTED"}.get(a["code"], a["code"])
+            return f"{ascii_label} | risk {a['risk']:.0f}% ({a.get('risk_source') or '-'})"
         if not self._detector.ready:
             return (f"Warming up {self._detector.window_fill}/{self._detector_len()}"
                     f" | {'person' if self._person else 'no person'}")
@@ -454,13 +469,24 @@ class LiveSession:
             if rule is not None:
                 self._raise_fall(*rule)
 
+            reading = self._posture.update(pix if person else None)
+            self._posture_high = self._posture_high + 1 if reading.score >= HIGH_AT else 0
+            if reading.score < MEDIUM_AT:
+                self._posture_latched = False
+            if POSTURE_ALERTS and self._posture_high >= POSTURE_HOLD_SAMPLES and not self._posture_latched:
+                self._posture_latched = True
+                self._raise_fall(round(float(reading.score), 4), "posture")
+
             with self._lock:
                 alarm = time.monotonic() < self._alarm_until
             self._assess.assess(
                 alarm=alarm, ready=self._detector.ready, guarded=bool(getattr(self._detector, "guarded", False)),
                 person=person, body_low=self._rules.body_low,
                 alarm_source=(self.last_event or {}).get("source"),
+                alarm_confidence=(self.last_event or {}).get("confidence"),
+                posture=reading,
             )
+            self._publish_risk()
 
             now = time.monotonic()
             n_fps += 1

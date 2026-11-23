@@ -300,11 +300,15 @@ BiLSTM-only mode with fewer false alarms.
 fall probability is below 0.10. Chosen on validation (false alerts/h 48 → 20), confirmed on test
 (55.4 → 33.3 per hour, F1 0.703 → 0.750, one extra missed fall).
 
-**Live status on Watch Live:** "Normal bed activity" (fall probability < 0.35), "Uncertain — Manual
-verification required" (0.35-0.65, person not in view, warming up, or body below its resting level),
-"Potential fall detected" (alert in the last 10 s, naming the detector). Normal % and fall % are the
-BiLSTM's sigmoid output averaged over the last two windows; nothing is shown when there is no valid
-prediction. Code: `ml-engine/live_status.py`.
+**Live fall-risk levels on Watch Live:** Normal (< 25%), Low risk (25–45%), Medium "Potential fall"
+(45–75%) and High "FALL DETECTED" (≥ 75% or any alert), updated every sample (6 per second) and pushed to
+the page instantly. Risk = the higher of the BiLSTM fall probability (sigmoid output, mean of the last two
+windows) and the posture score (`ml-engine/fall_risk.py`: torso horizontal × shoulders below the person's
+resting level; a heuristic, not a probability). The panel shows both and says which one drives the level.
+Bed versus floor: lying at the resting (bed) level scores low; lying lower than before scores high.
+Posture alerts after 2 s at High: test F1 0.750 → 0.741, false alerts 33.3 → 36.4 per hour (more
+sensitive, slightly less precise; `VITALYN_POSTURE_ALERTS=off` restores the evaluated logic). Code:
+`ml-engine/live_status.py`, `ml-engine/fall_risk.py`.
 
 **Speed:** BiLSTM on CPU 0.77 ms per window (3.4 ms on the Mac GPU, same outputs); pose model ~11 ms per
 frame on the GPU.

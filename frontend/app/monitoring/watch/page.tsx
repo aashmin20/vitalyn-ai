@@ -48,9 +48,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DemoDataBanner } from "@/components/patients/DemoDataBanner";
 import { PatientQr } from "@/components/patients/PatientQr";
 import { parseUtc } from "@/lib/utils";
-import type { CameraLink, FallEvent, LiveFallEvent, LiveSources, LiveStatus, Patient } from "@/lib/types";
+import type { CameraLink, FallAssessment as FallAssessmentT, FallEvent, LiveFallEvent, LiveSources, LiveStatus, Patient } from "@/lib/types";
 
-type SseMessage = ({ type: "fall_detected"; patient_id: string } & LiveFallEvent) | ({ type: "status" } & LiveStatus);
+type SseMessage =
+  | ({ type: "fall_detected"; patient_id: string } & LiveFallEvent)
+  | ({ type: "status" } & LiveStatus)
+  | { type: "risk"; patient_id: string; assessment: FallAssessmentT };
 
 function WatchLive() {
   const params = useSearchParams();
@@ -59,6 +62,7 @@ function WatchLive() {
   const [problem, setProblem] = useState<ApiProblem | null>(null);
   const [alarms, setAlarms] = useState<(LiveFallEvent & { patient_id: string })[]>([]);
   const [streamFailed, setStreamFailed] = useState(false);
+  const [liveRisk, setLiveRisk] = useState<Record<string, FallAssessmentT>>({});
   const [pairing, setPairing] = useState<{ link: CameraLink | null; note: string | null } | null>(null);
   const [changing, setChanging] = useState(false);          // "Change camera" panel
   const [camMapMac, setCamMapMac] = useState<number | undefined>(undefined);
@@ -71,7 +75,7 @@ function WatchLive() {
     useCallback(() => listPatients("admitted"), []),
     3_000,
   );
-  const { data: status, refetch: refetchStatus } = usePoll<LiveStatus>(useCallback(() => getLiveStatus(), []), 2_000);
+  const { data: status, refetch: refetchStatus } = usePoll<LiveStatus>(useCallback(() => getLiveStatus(), []), 1_000);
   const { data: sources } = usePoll<LiveSources>(useCallback(() => getLiveSources(), []), 30_000);
   const { data: events } = usePoll<FallEvent[] | null>(
     useCallback(() => (patientId ? getPatientEvents(patientId) : Promise.resolve(null)), [patientId]),
@@ -158,6 +162,10 @@ function WatchLive() {
 
   // One feed for every monitored patient: a fall alarm must show up whichever patient is on screen.
   useEventSource<SseMessage>(live ? liveEventsUrl() : null, (msg) => {
+    if (msg.type === "risk" && msg.patient_id) {
+      setLiveRisk((prev) => ({ ...prev, [msg.patient_id]: msg.assessment }));
+      return;
+    }
     if (msg.type === "fall_detected" && msg.patient_id) {
       setAlarms((prev) => [msg, ...prev.filter((a) => a.id !== msg.id)].slice(0, 5));
       playAlertSound();
@@ -393,7 +401,12 @@ function WatchLive() {
             </CardContent>
           </Card>
 
-          {watching && <FallAssessment assessment={mySession?.assessment} retrained={mySession?.retrained_model} />}
+          {watching && (
+            <FallAssessment
+              assessment={(patientId && liveRisk[patientId]) || mySession?.assessment}
+              retrained={mySession?.retrained_model}
+            />
+          )}
 
           {watching && (
             <div className="flex justify-end">

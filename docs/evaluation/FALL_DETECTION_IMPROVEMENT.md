@@ -116,6 +116,38 @@ frame; its input size was not reduced, because that could change keypoint accura
 
 The batch pipeline for uploaded videos does not apply the veto (its BiLSTM runs after the frame loop).
 
+## Fall-risk levels and the posture check (fall_risk.py)
+
+**Problem seen in a live demo:** a person who lay down slowly on the floor in front of a desk camera raised
+nothing. The context rule needs a fast drop, and its alerts are held back when the BiLSTM (trained on bed
+scenes) is confident the movement is normal.
+
+**Change:** a per-sample posture score: how horizontal the torso is, multiplied by how far the shoulders are
+below the person's own recent resting level (in torso lengths). The resting level is frozen while the score is
+raised. Lying in bed keeps the body at the resting level, so the score stays low; lying on the floor after
+sitting or standing is horizontal and much lower, so it rises. If the person was already on the floor when
+monitoring started, there is nothing to compare with. The score is a heuristic, not a probability.
+
+**Display:** risk = the higher of the BiLSTM fall probability and the posture score, shown every sample with
+its source. Levels are Normal (< 25%), Low (25–45%), Medium (45–75%) and High (≥ 75%, or any alert). An alert
+record is created by the existing paths and, new, when the posture score stays ≥ 75% for 2 s
+(`VITALYN_POSTURE_ALERTS=off` restores exactly the logic evaluated above).
+
+**Measured (`python3 fall_eval.py risk`):**
+
+| | Test F1 | Precision | Recall | False alerts/h | IKAR recall |
+|---|---|---|---|---|---|
+| shipped before (BiLSTM + context + veto) | 0.750 | 0.759 | 0.741 | 33.3 | 209/278 |
+| + posture alerts (new default) | 0.741 | 0.741 | 0.741 | 36.4 | 209/278 |
+
+The posture alerts catch no extra FallVision test falls and add about 3 false alerts per hour. The IKAR clips
+are only about 4 s long (median 23 samples), too short for the 1 s learning period plus the 2 s hold, so they
+cannot test the posture alert itself. The posture display reaches High on 142/278 IKAR clips and Medium or
+higher on 205/278. Neither dataset contains the scenario this was added for (a slow lie-down in front of a desk
+camera), so its benefit there is shown by demonstration, not measured. Share of test samples by displayed
+level: normal clips 70.9% normal, 7.6% low, 6.0% medium, 4.9% high (10.7% no signal); fall clips 27.7% normal,
+3.9% low, 6.3% medium, 50.1% high (12.0% no signal).
+
 ## Limitations (read before any claim)
 * Not clinically validated. Every alert remains a potential event for staff review.
 * The ORIGINAL BiLSTM's training record is unknown and it contributes no alerts on this data; the retrained model replaces it by default.

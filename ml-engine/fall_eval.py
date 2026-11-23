@@ -253,6 +253,42 @@ def shipped_detector(clip: Clip) -> List[int]:
     return merge_alerts(out)
 
 
+def posture_alerts(clip: Clip) -> List[int]:
+    """The posture-risk alert path alone (fall_risk.py): score >= HIGH for 2 s, latched until < MEDIUM."""
+    from fall_risk import FloorPostureMonitor
+    from live_status import HIGH_AT, MEDIUM_AT
+    from live_pipeline import POSTURE_HOLD_SAMPLES
+    mon, run, latched, out = FloorPostureMonitor(), 0, False, []
+    for i, k in enumerate(clip.kpts):
+        s = mon.update(k).score
+        run = run + 1 if s >= HIGH_AT else 0
+        if s < MEDIUM_AT:
+            latched = False
+        if run >= POSTURE_HOLD_SAMPLES and not latched:
+            latched = True
+            out.append(i)
+    return merge_alerts(out)
+
+
+def risk_levels(clip: Clip) -> Dict[str, float]:
+    """Share of samples at each displayed risk level (shipped BiLSTM + posture score, no alerts)."""
+    from fall_risk import FloorPostureMonitor
+    from live_status import level_for
+    from streaming_detector import StreamingFallDetector
+    bilstm_v2_only(Clip("", 0, []))
+    stream, mon = StreamingFallDetector(_v2), FloorPostureMonitor()
+    probs: List[float] = []
+    counts = {"normal": 0, "low": 0, "medium": 0, "high": 0, "none": 0}
+    for k in clip.kpts:
+        stream.push(to_vector(k, clip.size))
+        if getattr(stream, "_since_eval", 0) == 1 and stream.ready and stream.last_probability is not None:
+            probs = (probs + [stream.last_probability])[-2:]
+        reading = mon.update(k)
+        vals = ([sum(probs) / len(probs)] if probs else []) + ([reading.score] if reading.drop is not None else [])
+        counts[level_for(max(vals)) if vals else "none"] += 1
+    return counts
+
+
 def bilstm_v2_only(clip: Clip) -> List[int]:
     """The retrained BiLSTM (train_bilstm.py) with its validation-chosen threshold, live decision rules."""
     global _v2
@@ -384,6 +420,28 @@ def main(argv: List[str]) -> int:
             if ikar:
                 hits = sum(1 for c in ikar if det(c))
                 print(f"{'':34s} IKAR standing-fall recall {hits}/{len(ikar)} = {hits / len(ikar):.3f}")
+        return 0
+    if mode == "risk":
+        # Effect of the posture-risk path (fall_risk.py) added for live demos. TEST is held out.
+        ikar = load_ikar() if os.path.exists(IKAR_CACHE) else []
+        shipped_plus = union(shipped_detector, posture_alerts)
+        for label, det in (("posture alerts only", posture_alerts),
+                           ("shipped (BiLSTM + context + veto)", shipped_detector),
+                           ("shipped + posture alerts (new default)", shipped_plus)):
+            for name, subset in (("dev", dev), ("TEST", test)):
+                print(fmt(f"{label} [{name}]", evaluate(subset, det)))
+            if ikar:
+                hits = sum(1 for c in ikar if det(c))
+                print(f"{'':34s} IKAR standing-fall recall {hits}/{len(ikar)} = {hits / len(ikar):.3f}")
+        for lbl, subset in (("TEST normal clips", [c for c in test if c.label == 0]),
+                            ("TEST fall clips", [c for c in test if c.label == 1])):
+            tot: Dict[str, int] = {}
+            for c in subset:
+                for k, v in risk_levels(c).items():
+                    tot[k] = tot.get(k, 0) + v
+            n = sum(tot.values()) or 1
+            print(f"{lbl}: share of samples by displayed level  " +
+                  "  ".join(f"{k} {100 * v / n:.1f}%" for k, v in tot.items()))
         return 0
     if mode == "calibrate":
         # Alert-level calibration: is an alert raised in a fall clip? Fit on DEV, check on TEST.

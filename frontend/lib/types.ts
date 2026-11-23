@@ -127,13 +127,18 @@ export interface LiveFallEvent {
 /** Three-way status from the live session. Percentages are the BiLSTM's own output, or null when the
  *  model has no valid prediction (never estimated). */
 export interface FallAssessment {
-  code: "normal" | "uncertain" | "potential_fall";
+  code: "normal" | "low" | "medium" | "high" | "uncertain";
   label: string;
+  /** Overall fall risk in % = the higher of the BiLSTM probability and the posture score. */
+  risk: number | null;
+  risk_source: "bilstm" | "posture" | "alert" | null;
+  /** BiLSTM fall probability (%) and its complement. */
   fall_confidence: number | null;
   normal_confidence: number | null;
   reason: string;
   source: string;
   raised_by?: string | null;
+  posture: { score: number | null; reason: string; horizontal: number; drop: number | null; angle: number | null } | null;
 }
 
 export interface LiveStatus {

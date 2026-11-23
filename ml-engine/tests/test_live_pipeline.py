@@ -200,7 +200,8 @@ def test_status_reports_the_models_own_numbers(video):
     s.start()
     wait_stopped(s)
     a = s.status()["assessment"]
-    assert a["label"] in ("Normal bed activity", "Potential fall detected", "Uncertain — Manual verification required")
+    from live_status import LABELS
+    assert a["label"] in LABELS.values()
     if a["fall_confidence"] is not None:            # only ever the classifier's output (0.95 here)
         assert a["fall_confidence"] == 95.0 and a["normal_confidence"] == 5.0
 

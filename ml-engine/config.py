@@ -89,3 +89,8 @@ def configure_logging(level: str = "INFO") -> None:
     )
     # Suppress noisy ultralytics output
     logging.getLogger("ultralytics").setLevel(logging.WARNING)
+
+# Posture risk (fall_risk.py): a person lying well below their resting position for 2 s raises an
+# alert (source "posture"), even when the BiLSTM disagrees. Turn off with VITALYN_POSTURE_ALERTS=off
+# to get exactly the FallVision-evaluated decision logic. The risk level is shown either way.
+POSTURE_ALERTS = os.getenv("VITALYN_POSTURE_ALERTS", "on").lower() not in ("off", "0", "false")
