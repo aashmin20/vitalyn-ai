@@ -45,6 +45,9 @@ async def lifespan(_app):
             job.completed_at = datetime.now(timezone.utc)
             session.add(job)
         session.commit()
+    # Ask for / confirm macOS camera permission on the main thread (see camera_preflight.py).
+    from camera_preflight import preflight_camera
+    preflight_camera()
     # Optional phone-camera gateway (HTTPS listener for phone browsers, opt-in).
     gateway = None
     if os.getenv("VITALYN_PHONE_GATEWAY") == "1":

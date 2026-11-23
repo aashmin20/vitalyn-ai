@@ -305,6 +305,15 @@ class LiveSession:
 
     def _open(self) -> cv2.VideoCapture:
         cap = make_capture(self.source)
+        if isinstance(self.source, int):
+            # A local camera can be briefly busy (just released by another session
+            # or app); retry a few times before reporting an error.
+            for _ in range(3):
+                if cap.isOpened():
+                    break
+                cap.release()
+                time.sleep(1.0)
+                cap = make_capture(self.source)
         if not cap.isOpened():
             cap.release()
             hint = ""
