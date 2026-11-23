@@ -173,6 +173,15 @@ def test_create_and_list_rooms(client):
     assert len(rooms) >= 1
     assert any(room["room_number"] == "201" for room in rooms)
 
+def test_duplicate_room_number_is_a_clear_409(client):
+    # Used to crash with a database error, which the browser showed as "Failed to fetch".
+    assert client.post("/api/v1/rooms", json={"room_number": "299", "floor": "2"}).status_code == 200
+    dup = client.post("/api/v1/rooms", json={"room_number": " 299 ", "floor": "3"},
+                      headers={"Origin": "http://localhost:3000"})
+    assert dup.status_code == 409
+    assert "already exists" in dup.json()["detail"]
+    assert dup.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
 def test_create_and_get_room(client):
     room_data = {
         "room_number": "202",

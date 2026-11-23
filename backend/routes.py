@@ -60,6 +60,11 @@ def list_rooms(session: Session = Depends(get_session)):
 
 @router.post("/rooms", response_model=Room, dependencies=[Depends(require_roles(*ADMIN))])
 def create_room(room: Room, session: Session = Depends(get_session)):
+    room.room_number = room.room_number.strip()
+    if not room.room_number:
+        raise HTTPException(status_code=422, detail="Room number is required.")
+    if session.exec(select(Room).where(Room.room_number == room.room_number)).first():
+        raise HTTPException(status_code=409, detail=f"Room {room.room_number} already exists.")
     session.add(room)
     session.commit()
     session.refresh(room)

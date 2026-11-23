@@ -78,6 +78,18 @@ app = FastAPI(
     version="1.0.0",
 )
 
+from sqlalchemy.exc import IntegrityError  # noqa: E402
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(_request, _exc):
+    # A unique/foreign-key violation is the user's input, not a crash. Returning it
+    # here (inside the CORS middleware) also keeps CORS headers, so the browser shows
+    # this message instead of a bare "Failed to fetch".
+    return JSONResponse(status_code=409, content={
+        "detail": "That record conflicts with an existing one (for example a duplicate number)."})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"]
